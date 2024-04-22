@@ -1,0 +1,30 @@
+ARG FUNCTION_DIR="/function"
+
+FROM python:3.10 as build-image
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libarchive-tools zip unzip gzip curl jq wget software-properties-common g++ make cmake file libcurl4-openssl-dev && \
+    wget https://fsl.fmrib.ox.ac.uk/fsldownloads/fslinstaller.py && \
+    yes '' | python3 fslinstaller.py && \
+    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+ARG FUNCTION_DIR
+RUN mkdir -p ${FUNCTION_DIR}
+COPY . ${FUNCTION_DIR}
+RUN pip install --target ${FUNCTION_DIR} awslambdaric nipype nilearn boto3
+
+FROM python:3.10-slim
+
+ARG FUNCTION_DIR
+
+WORKDIR ${FUNCTION_DIR}
+
+COPY --from=build-image ${FUNCTION_DIR} ${FUNCTION_DIR}
+COPY --from=build-image /usr/local/fsl /usr/local/fsl
+ENV FSLDIR /usr/local/fsl
+ENV PATH $PATH:$FSLDIR/bin
+ENV FSLOUTPUTTYPE=NIFTI_GZ
+RUN echo ". ${FSLDIR}/etc/fslconf/fsl.sh" >> ~/.bashrc
+
+ENTRYPOINT [ "/usr/local/bin/python", "-m", "awslambdaric" ]
+CMD [ "app.handler" ]
