@@ -453,7 +453,6 @@ class NDS(ModelSpace):
             s1 = self.stem1(s0)
         else:
             s0 = s1 = self.stem(inputs)
-        print(self.auxiliary_loss)
         for stage_idx, stage in enumerate(self.stages):
             if stage_idx == 2 and self.auxiliary_loss and self.training:
                 assert isinstance(stage, nn.Sequential), 'Auxiliary loss is only supported for fixed architecture.'
