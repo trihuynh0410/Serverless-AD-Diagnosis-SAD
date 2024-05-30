@@ -1,6 +1,6 @@
 import os
 base_dir = r''  
-stage = ["CN", "MCI", "Mild"]
+stage = ["CN", "MCI", "AD"]
 for s in stage:
     s_dir = os.path.join(base_dir, s)
     list_dir = os.listdir(s_dir)

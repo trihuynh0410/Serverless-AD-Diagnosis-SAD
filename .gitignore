@@ -1,3 +1,4 @@
 *_gitig_*
 *.ipynb
 __pycache__/
+*.txt
