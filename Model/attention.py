@@ -334,12 +334,12 @@ class MobileViTBlock(nn.Module):
         self.patch_area = patch_size ** 3
         self.mqa = mqa
         self.kan = kan
-        self.local_rep = SepConv3d(in_channels, transformer_dim, conv_ksize, act=HSwish(), use_norm_point=False)
+        # self.local_rep = SepConv3d(in_channels, transformer_dim, conv_ksize, act=HSwish(), use_norm_point=False)
 
-        global_rep = [Transformer(transformer_dim, img_size, depth, num_heads, dim_head=64, dropout=dropout, last_stage=last_stage, kan=kan), nn.LayerNorm(transformer_dim)]
-        self.global_rep = MQAWithDownSampling(transformer_dim, num_heads, transformer_dim, kan=kan) if mqa else nn.Sequential(*global_rep)
+        global_rep = [Transformer(in_channels, img_size, depth, num_heads, dim_head=64, dropout=dropout, last_stage=last_stage, kan=kan), nn.LayerNorm(transformer_dim)]
+        self.global_rep = MQAWithDownSampling(in_channels, num_heads, in_channels, kan=kan) if mqa else nn.Sequential(*global_rep)
 
-        self.conv_proj = Conv3D(transformer_dim, in_channels, kernel_size=1, stride=1, act=HSwish())
+        # self.conv_proj = Conv3D(transformer_dim, in_channels, kernel_size=1, stride=1, act=HSwish())
         self.fusion = Conv3D(2 * in_channels, in_channels, conv_ksize, stride=1, act=HSwish())
 
     def unfold(self, x):
@@ -363,10 +363,10 @@ class MobileViTBlock(nn.Module):
 
     def forward(self, x):
         res = x
-        fm = self.local_rep(x)
+        # fm = self.local_rep(x)
         if not self.mqa:
             # convert feature map to patches
-            patches, info_dict = self.unfold(fm)
+            patches, info_dict = self.unfold(x)
 
             # learn global representations
             for transformer_layer in self.global_rep:
@@ -375,8 +375,8 @@ class MobileViTBlock(nn.Module):
             # [B x Patch x Patches x C] -> [B x C x Patches x Patch]
             fm = self.fold(x=patches, info_dict=info_dict)
         else:
-            fm = self.global_rep(fm)
-        fm = self.conv_proj(fm)
+            fm = self.global_rep(x)
+        # fm = self.conv_proj(fm)
         output = self.fusion(torch.cat((res, fm), dim=1))
         # print("mobilevit dim", output.shape)
         # print("kan stage",self.kan)

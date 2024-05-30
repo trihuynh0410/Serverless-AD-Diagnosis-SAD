@@ -463,9 +463,6 @@ class NDS(ModelSpace):
                     if block_idx == 0:
                         logits_aux = self.auxiliary_head(s1)
             else:
-                print("stage idx",stage_idx)
-                print("s0 shape", s0.shape)
-                print("s1 shape", s1.shape)
                 s0, s1 = stage([s0, s1])
 
         out = self.global_pooling(s1)

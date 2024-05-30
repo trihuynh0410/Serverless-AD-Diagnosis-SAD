@@ -1,4 +1,6 @@
 import json
+import warnings
+warnings.filterwarnings("ignore")
 
 from model_space import *
 from torch.utils.data import random_split
@@ -7,8 +9,6 @@ from nni.nas.evaluator.pytorch import DataLoader, Classification
 from nni.nas.strategy import DARTS as DartsStrategy
 from nni.nas.experiment import NasExperiment
 
-log_dir = './lightning_logs'
-os.makedirs(log_dir, exist_ok=True)
 class CustomTransform:
     def __call__(self, sample):
         sample = F.to_tensor(sample)
@@ -24,8 +24,8 @@ val_size = len(full_dataset) - train_size
 
 train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size])
 
-train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
-val_loader = DataLoader(val_dataset, batch_size=64, shuffle=False)
+train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
+val_loader = DataLoader(val_dataset, batch_size=32, shuffle=True)
 
 evaluator = Classification(
     accelerator='gpu', 
@@ -40,7 +40,7 @@ evaluator = Classification(
 )
 
 model_space = MKNAS(
-    width=(16, 32, 64),       
+    width=16,       
     num_cells=8,        
 )
 
