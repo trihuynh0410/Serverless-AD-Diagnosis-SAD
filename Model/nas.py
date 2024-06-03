@@ -6,7 +6,7 @@ from model_space import *
 from torch.utils.data import random_split
 from torchvision import datasets, transforms
 from nni.nas.evaluator.pytorch import DataLoader, Classification
-from nni.nas.strategy import DARTS as DartsStrategy
+from nni.nas.strategy import Proxyless as Proxyless
 from nni.nas.experiment import NasExperiment
 
 class CustomTransform:
@@ -45,7 +45,7 @@ model_space = ProxylessNAS(
     dropout_rate=0.5   
 )
 
-strategy = DartsStrategy()
+strategy = Proxyless()
 
 experiment = NasExperiment(model_space, evaluator, strategy)
 experiment.run()
