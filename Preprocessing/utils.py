@@ -34,14 +34,15 @@ def empty_folder(folder_path):
         print(f'Folder {folder_path} does not exist.')
 
 def preprocess(file_path, ref_path, base_dir):
-    reorient = Node(fsl.Reorient2Std(in_file=file_path), output_type='NIFTI_GZ', name='reorient')
-    robustfov = Node(fsl.RobustFOV(), output_type='NIFTI_GZ', name='robustfov')
+
+    # reorient = Node(fsl.Reorient2Std(in_file=file_path), output_type='NIFTI_GZ', name='reorient')
+    robustfov = Node(fsl.RobustFOV(in_file=file_path), output_type='NIFTI_GZ', name='robustfov')
     fast = Node(fsl.FAST(output_biascorrected = True, img_type = 1, no_pve = True), output_type='NIFTI_GZ', name='fast')
     flirt = Node(fsl.FLIRT(reference = ref_path), output_type='NIFTI_GZ', name='flirt')
     bet = Node(fsl.BET(in_file=file_path), output_type='NIFTI_GZ', name='bet')
     wf = Workflow(name="flow", base_dir=base_dir)
     wf.connect([
-        (reorient, robustfov,[('out_file','in_file')]),
+        # (reorient, robustfov,[('out_file','in_file')]),
         (robustfov, fast,[('out_roi','in_files')]),
         (fast, flirt,[('restored_image','in_file')]),
         (flirt, bet,[('out_file','in_file')])
@@ -53,7 +54,7 @@ def naming(key, base_dir):
 
     base_name, _ = os.path.splitext(file_name)
 
-    file_path = base_dir + "/flow/bet/" + base_name + "_reoriented_ROI_restore_flirt_brain.nii.gz"
+    file_path = base_dir + "/flow/bet/" + base_name + "_ROI_restore_flirt_brain.nii.gz"
     s3_key = "fsl/" + base_name + ".nii.gz"
     return file_path, s3_key
 
