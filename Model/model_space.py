@@ -11,23 +11,7 @@ from kan import *
 import math
 
 MaybeIntChoice = Union[int, MutableExpression[int]]
-OPS = {
-    'none': lambda C, stride, affine:
-        Zero(stride),
-    'avg_pool_3x3': lambda C, stride, affine:
-        nn.AvgPool3d(3, stride=stride, padding=1, count_include_pad=False),
-    'avg_pool_5x5': lambda C, stride, affine:
-        nn.AvgPool3d(5, stride=stride, padding=2, count_include_pad=False),
-    'max_pool_3x3': lambda C, stride, affine:
-        nn.MaxPool3d(3, stride=stride, padding=1),
-    'max_pool_5x5': lambda C, stride, affine:
-        nn.MaxPool3d(5, stride=stride, padding=2),
-    'skip_connect': lambda C, stride, affine:
-        nn.Identity() if stride == 1 else FactorizedReduce(C, C, affine=affine),
-    'kan': lambda C, stride, affine:
-        KanWarapper(C,C,base_activation=nn.Hardswish), 
-   
-}
+
 class Zero(nn.Module):
 
     def __init__(self, stride):
@@ -419,13 +403,6 @@ def inverted_residual_choice_builder(
                 partial(_se_or_skip, optional=False, se_from_exp=True, label=f's0_i0_se')),
                             first_conv=first_conv,second_conv=second_conv
                             )
-        if stride == 1:
-            op_choices['kan'] = KanWarapper(inp,oup,base_activation=nn.Hardswish) 
-            op_choices['avg_pool_3x3'] = nn.AvgPool3d(3, stride=stride, padding=1)
-            # op_choices['avg_pool_5x5'] = nn.AvgPool3d(5, stride=stride, padding=2)
-            op_choices['max_pool_3x3'] = nn.MaxPool3d(3, stride=stride, padding=1)
-            # op_choices['max_pool_5x5'] = nn.MaxPool3d(5, stride=stride, padding=2)
-        # op_choices['skip_connect'] = nn.Identity() if stride == 1 else FactorizedReduce(inp, oup, affine=True)
 
         # It can be implemented with ValueChoice, but we use LayerChoice here
         # to be aligned with the intention of the original ProxylessNAS.
@@ -473,7 +450,7 @@ class ProxylessNAS(ModelSpace):
         assert len(base_widths) == 9
         # include the last stage info widths here
         widths = [make_divisible(width * width_mult, 8) for width in base_widths]
-        downsamples = [True, False, True, True, True, False, False, False]
+        downsamples = [True, False, False, False, True, False, False, False]
 
         self.num_labels = num_labels
         self.dropout_rate = dropout_rate
@@ -503,13 +480,16 @@ class ProxylessNAS(ModelSpace):
         self.blocks = nn.Sequential(*blocks)
         # print(self.blocks)
         # final layers
-        self.feature_mix_layer = ConvBNReLU(widths[7], widths[8], kernel_size=1, norm_layer=MutableBatchNorm3d)
+        self.feature_mix_layer = LayerChoice({
+            "conv": ConvBNReLU(widths[7], widths[8], kernel_size=1, norm_layer=MutableBatchNorm3d),
+            "kan":KanWarapper(widths[7], widths[8],base_activation=nn.Softmax)
+        }, label='s8_depth')
         self.global_avg_pooling = nn.AdaptiveAvgPool3d(1)
         self.dropout_layer = nn.Dropout(dropout_rate)
-        self.classifier = LayerChoice([
-            MutableLinear(widths[-1], self.num_labels),
-            MutableKAN([widths[-1], self.num_labels],base_activation=nn.Softmax)
-        ], label='classifier')
+        self.classifier = LayerChoice({
+            "mlp":MutableLinear(widths[-1], self.num_labels),
+            "kan":KanWarapper(widths[-1], self.num_labels,base_activation=nn.Softmax)
+        }, label='classifier')
         reset_parameters(self, bn_momentum=bn_momentum, bn_eps=bn_eps)
 
     def forward(self, x):
