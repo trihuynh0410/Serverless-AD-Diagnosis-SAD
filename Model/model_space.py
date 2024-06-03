@@ -473,7 +473,7 @@ class ProxylessNAS(ModelSpace):
         assert len(base_widths) == 9
         # include the last stage info widths here
         widths = [make_divisible(width * width_mult, 8) for width in base_widths]
-        downsamples = [True, False, True, True, True, False, True, False]
+        downsamples = [True, False, True, True, True, False, False, False]
 
         self.num_labels = num_labels
         self.dropout_rate = dropout_rate

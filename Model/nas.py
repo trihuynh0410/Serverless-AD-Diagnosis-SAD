@@ -39,9 +39,10 @@ evaluator = Classification(
     num_classes=3
 )
 
-model_space = MKNAS(
-    width=16,       
-    num_cells=8,        
+model_space = ProxylessNAS(
+    num_labels=3,
+    base_widths=(4, 8, 12 ,16, 20, 24, 28, 32, 36),
+    dropout_rate=0.5   
 )
 
 strategy = DartsStrategy()
