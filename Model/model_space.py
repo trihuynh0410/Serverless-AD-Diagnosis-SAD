@@ -403,7 +403,8 @@ def inverted_residual_choice_builder(
                 partial(_se_or_skip, optional=False, se_from_exp=True, label=f's0_i0_se')),
                             first_conv=first_conv,second_conv=second_conv
                             )
-
+        if stride ==1:
+            op_choices['kan'] = KanWarapper(inp,oup,base_activation=nn.Hardswish)
         # It can be implemented with ValueChoice, but we use LayerChoice here
         # to be aligned with the intention of the original ProxylessNAS.
         return LayerChoice(op_choices, label=f'{label}_i{index}')
@@ -482,7 +483,7 @@ class ProxylessNAS(ModelSpace):
         # final layers
         self.feature_mix_layer = LayerChoice({
             "conv": ConvBNReLU(widths[7], widths[8], kernel_size=1, norm_layer=MutableBatchNorm3d),
-            "kan":KanWarapper(widths[7], widths[8],base_activation=nn.Softmax)
+            "kan":KanWarapper(widths[7], widths[8],base_activation=nn.Hardswish)
         }, label='s8_depth')
         self.global_avg_pooling = nn.AdaptiveAvgPool3d(1)
         self.dropout_layer = nn.Dropout(dropout_rate)
