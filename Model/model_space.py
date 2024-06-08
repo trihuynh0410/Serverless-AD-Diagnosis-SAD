@@ -4,45 +4,12 @@ from typing import Tuple, List, Union, Literal, Callable, Optional, cast, Type, 
 import torch
 from torch import nn
 
-import nni
 from nni.mutable import MutableExpression
 from nni.nas.nn.pytorch import ModelSpace, LayerChoice, Repeat, MutableConv3d, MutableBatchNorm3d, MutableLinear
 from kan import *
 import math
 
 MaybeIntChoice = Union[int, MutableExpression[int]]
-
-class Zero(nn.Module):
-
-    def __init__(self, stride):
-        super().__init__()
-        self.stride = stride
-
-    def forward(self, x):
-        if self.stride == 1:
-            return x.mul(0.)
-        return x[:, :, ::self.stride, ::self.stride].mul(0.)
-
-class FactorizedReduce(nn.Module):
-
-    def __init__(self, C_in, C_out, affine=True):
-        super().__init__()
-        if isinstance(C_out, int):
-            assert C_out % 2 == 0
-        else:   # is a value choice
-            assert all(c % 2 == 0 for c in C_out.grid())
-        self.relu = nn.ReLU(inplace=False)
-        self.conv_1 = MutableConv3d(C_in, C_out // 2, 1, stride=1, padding=0, bias=False)
-        self.conv_2 = MutableConv3d(C_in, C_out // 2, 1, stride=1, padding=0, bias=False)
-        self.bn = MutableBatchNorm3d(C_out, affine=affine)
-        self.pad = nn.ConstantPad3d((0, 1, 0, 1, 0, 1), 0)
-
-    def forward(self, x):
-        x = self.relu(x)
-        y = self.pad(x)
-        out = torch.cat([self.conv_1(x), self.conv_2(y[:, :, 1:, 1:, 1:])], dim=1)
-        out = self.bn(out)
-        return out
 
 class KanWarapper(nn.Module):
     def __init__(self, in_channel, out_channel, base_activation):
@@ -451,7 +418,7 @@ class ProxylessNAS(ModelSpace):
         assert len(base_widths) == 9
         # include the last stage info widths here
         widths = [make_divisible(width * width_mult, 8) for width in base_widths]
-        downsamples = [True, False, False, False, True, False, False, False]
+        downsamples = [True, True, True, False, True, False, False, False]
 
         self.num_labels = num_labels
         self.dropout_rate = dropout_rate
