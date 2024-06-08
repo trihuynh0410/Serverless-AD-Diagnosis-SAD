@@ -418,7 +418,7 @@ class ProxylessNAS(ModelSpace):
         assert len(base_widths) == 9
         # include the last stage info widths here
         widths = [make_divisible(width * width_mult, 8) for width in base_widths]
-        downsamples = [True, True, True, False, True, False, False, False]
+        downsamples = [True, True, True, True, True, False, False, False]
 
         self.num_labels = num_labels
         self.dropout_rate = dropout_rate
@@ -437,7 +437,7 @@ class ProxylessNAS(ModelSpace):
             # Rather than returning a fixed module here,
             # we return a builder that dynamically creates module for different `repeat_idx`.
             builder = inverted_residual_choice_builder(
-                [3, 6], [3, 5, 7], downsamples[stage], widths[stage - 1], widths[stage], f's{stage}')
+                [3, 6], [3, 5], downsamples[stage], widths[stage - 1], widths[stage], f's{stage}')
             if stage < 7:
                 blocks.append(Repeat(builder, (1, 4), label=f's{stage}_depth'))
             else:
