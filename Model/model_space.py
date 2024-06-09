@@ -231,7 +231,8 @@ class UniversialInvertedResidual(nn.Sequential):
         in_channels: MaybeIntChoice,
         out_channels: MaybeIntChoice,
         expand_ratio: Union[float, MutableExpression[float]],
-        kernel_size: MaybeIntChoice = 3,
+        kernel_size1: MaybeIntChoice = 3,
+        kernel_size2: MaybeIntChoice = 3,
         stride: int = 1,
         squeeze_excite: Optional[Callable[[MaybeIntChoice, MaybeIntChoice], nn.Module]] = None,
         norm_layer: Optional[Callable[[int], nn.Module]] = None,
@@ -249,10 +250,10 @@ class UniversialInvertedResidual(nn.Sequential):
         # NOTE: this equivalence check (==) does NOT work for ValueChoice, need to use "is"
         self.has_skip = stride == 1 and in_channels is out_channels
 
-        first_depth = ConvBNReLU(in_channels, in_channels, stride=stride, kernel_size=kernel_size, groups=in_channels,
+        first_depth = ConvBNReLU(in_channels, in_channels, stride=stride, kernel_size=kernel_size1, groups=in_channels,
                        norm_layer=norm_layer, activation_layer=activation_layer) if first_conv else nn.Identity()
         
-        Second_depth = ConvBNReLU(hidden_ch, hidden_ch, stride=1, kernel_size=kernel_size, groups=hidden_ch,
+        Second_depth = ConvBNReLU(hidden_ch, hidden_ch, stride=1, kernel_size=kernel_size2, groups=hidden_ch,
                        norm_layer=norm_layer, activation_layer=activation_layer) if second_conv else nn.Identity()
                 
         layers: List[nn.Module] = [
@@ -353,23 +354,24 @@ def inverted_residual_choice_builder(
             second_convs = [True]
         op_choices = {}
         for exp_ratio in expand_ratios:
-            for kernel_size in kernel_sizes:
-                for first_conv in first_convs:
-                    for second_conv in second_convs:
-                        if first_conv and second_conv:
-                            t = "ExtraDW"
-                        elif not first_conv and second_conv:
-                            t = "InvertedBottleneck"
-                        elif first_conv and not second_conv:
-                            t = "ConvNext"
-                        elif not first_conv and not second_conv:
-                            t = "FFN"
-                        op_choices[f'k{kernel_size}e{exp_ratio}{t}'] = UniversialInvertedResidual(
-                            inp, oup, exp_ratio, kernel_size, stride,
-                            squeeze_excite=cast(Callable[[MaybeIntChoice, MaybeIntChoice], nn.Module], 
-                partial(_se_or_skip, optional=False, se_from_exp=True, label=f's0_i0_se')),
-                            first_conv=first_conv,second_conv=second_conv
-                            )
+            for kernel_size1 in kernel_sizes:
+                for kernel_size2 in kernel_sizes:
+                    for first_conv in first_convs:
+                        for second_conv in second_convs:
+                            if first_conv and second_conv:
+                                t = "ExtraDW"
+                            elif not first_conv and second_conv:
+                                t = "InvertedBottleneck"
+                            elif first_conv and not second_conv:
+                                t = "ConvNext"
+                            elif not first_conv and not second_conv:
+                                t = "FFN"
+                            op_choices[f'k1{kernel_size1}k2{kernel_size2}e{exp_ratio}{t}'] = UniversialInvertedResidual(
+                                inp, oup, exp_ratio, kernel_size1, kernel_size2, stride,
+                                squeeze_excite=cast(Callable[[MaybeIntChoice, MaybeIntChoice], nn.Module], 
+                    partial(_se_or_skip, optional=False, se_from_exp=True, label=f's0_i0_se')),
+                                first_conv=first_conv,second_conv=second_conv
+                                )
         # if stride ==1:
         #     op_choices['kan'] = KanWarapper(inp,oup,base_activation=nn.ReLU6)
         # It can be implemented with ValueChoice, but we use LayerChoice here
@@ -437,7 +439,7 @@ class ProxylessNAS(ModelSpace):
             # Rather than returning a fixed module here,
             # we return a builder that dynamically creates module for different `repeat_idx`.
             builder = inverted_residual_choice_builder(
-                [3, 6], [3, 5], downsamples[stage], widths[stage - 1], widths[stage], f's{stage}')
+                [3, 6], [3, 5, 7], downsamples[stage], widths[stage - 1], widths[stage], f's{stage}')
             if stage < 7:
                 blocks.append(Repeat(builder, (1, 4), label=f's{stage}_depth'))
             else:
