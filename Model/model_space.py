@@ -3,6 +3,7 @@ from typing import Tuple, List, Union, Iterable, Literal, Dict, Callable, Option
 
 import torch
 from torch import nn
+
 from nni.nas.oneshot.pytorch.supermodule.sampling import PathSamplingRepeat
 from nni.nas.oneshot.pytorch.supermodule.differentiable import DifferentiableMixedRepeat
 import nni
@@ -10,19 +11,14 @@ from nni.mutable import MutableExpression, Sample
 from nni.nas.nn.pytorch import ModelSpace, LayerChoice, Repeat, Cell, MutableConv2d, MutableBatchNorm2d, MutableLinear, model_context
 from nni.nas.hub.pytorch.utils.nn import DropPath
 from kan import *
-
 MaybeIntChoice = Union[int, MutableExpression]
 OPS = {
     'none': lambda C, stride, affine:
         Zero(stride),
     'avg_pool_3x3': lambda C, stride, affine:
         nn.AvgPool2d(3, stride=stride, padding=1, count_include_pad=False),
-    'avg_pool_5x5': lambda C, stride, affine:
-        nn.AvgPool2d(5, stride=stride, padding=2, count_include_pad=False),
     'max_pool_3x3': lambda C, stride, affine:
         nn.MaxPool2d(3, stride=stride, padding=1),
-    'max_pool_5x5': lambda C, stride, affine:
-        nn.MaxPool2d(5, stride=stride, padding=2),
     'skip_connect': lambda C, stride, affine:
         nn.Identity() if stride == 1 else FactorizedReduce(C, C, affine=affine),
     'conv_1x1': lambda C, stride, affine:
@@ -37,42 +33,36 @@ OPS = {
             MutableConv2d(C, C, 3, stride=stride, padding=1, bias=False),
             MutableBatchNorm2d(C, affine=affine)
         ),
-    'sep_conv_3x3': lambda C, stride, affine:
-        SepConv(C, C, 3, stride, 1, affine=affine),
-    'sep_conv_5x5': lambda C, stride, affine:
-        SepConv(C, C, 5, stride, 2, affine=affine),
-    'dil_conv_3x3': lambda C, stride, affine:
-        DilConv(C, C, 3, stride, 2, 2, affine=affine),
-    'dil_conv_5x5': lambda C, stride, affine:
-        DilConv(C, C, 5, stride, 4, 2, affine=affine),
-    'dil_sep_conv_3x3': lambda C, stride, affine:
-        DilSepConv(C, C, 3, stride, 2, 2, affine=affine),
-    'kan': lambda C, stride, affine:
+    'kan_hswish': lambda C, stride, affine:
         KanWarapper(C,C,base_activation=nn.Hardswish),
+    'kan_relu6': lambda C, stride, affine:
+        KanWarapper(C,C,base_activation=nn.ReLU6),
+    'kan_silu': lambda C, stride, affine:
+        KanWarapper(C,C,base_activation=nn.SiLU),    
     'extra_dw': lambda C, stride, affine:
         UniversialInvertedResidual(
-            C,C,2,3, stride,
+            C,C,3,3, stride,
             squeeze_excite=cast(Callable[[MaybeIntChoice, MaybeIntChoice], nn.Module], 
                 partial(_se_or_skip, optional=False, se_from_exp=True, label=f'extra_dw')),
             first_conv=True, second_conv=True
                 ),
     'invert_bottleneck': lambda C, stride, affine:
         UniversialInvertedResidual(
-            C,C,2,3, stride,
+            C,C,3,3, stride,
             squeeze_excite=cast(Callable[[MaybeIntChoice, MaybeIntChoice], nn.Module], 
                 partial(_se_or_skip, optional=False, se_from_exp=True, label=f'ib')),
             first_conv=False, second_conv=True
                 ),
     'conv_next': lambda C, stride, affine:
         UniversialInvertedResidual(
-            C,C,2,3, stride,
+            C,C,3,3, stride,
             squeeze_excite=cast(Callable[[MaybeIntChoice, MaybeIntChoice], nn.Module], 
                 partial(_se_or_skip, optional=False, se_from_exp=True, label=f'conv_next')),
             first_conv=True, second_conv=False
                 ),
     'ffn': lambda C, stride, affine:
         UniversialInvertedResidual(
-            C,C,2,3, stride,
+            C,C,3,3, stride,
             squeeze_excite=cast(Callable[[MaybeIntChoice, MaybeIntChoice], nn.Module], 
                 partial(_se_or_skip, optional=False, se_from_exp=True, label=f'ffn')),
             first_conv=False, second_conv=False
@@ -115,41 +105,6 @@ class ReLUConvBN(nn.Sequential):
                 padding=padding, bias=False
             ),
             MutableBatchNorm2d(C_out, affine=affine)
-        )
-
-
-class DilConv(nn.Sequential):
-
-    def __init__(self, C_in, C_out, kernel_size, stride, padding, dilation, affine=True):
-        super().__init__(
-            nn.ReLU(inplace=False),
-            MutableConv2d(
-                C_in, C_in, kernel_size=kernel_size, stride=stride,
-                padding=padding, dilation=dilation, groups=C_in, bias=False
-            ),
-            MutableConv2d(C_in, C_out, kernel_size=1, padding=0, bias=False),
-            MutableBatchNorm2d(C_out, affine=affine),
-        )
-
-
-class SepConv(nn.Sequential):
-
-    def __init__(self, C_in, C_out, kernel_size, stride, padding, affine=True):
-        super().__init__(
-            nn.ReLU(inplace=False),
-            MutableConv2d(
-                C_in, C_in, kernel_size=kernel_size, stride=stride,
-                padding=padding, groups=C_in, bias=False
-            ),
-            MutableConv2d(C_in, C_in, kernel_size=1, padding=0, bias=False),
-            MutableBatchNorm2d(C_in, affine=affine),
-            nn.ReLU(inplace=False),
-            MutableConv2d(
-                C_in, C_in, kernel_size=kernel_size, stride=1,
-                padding=padding, groups=C_in, bias=False
-            ),
-            MutableConv2d(C_in, C_out, kernel_size=1, padding=0, bias=False),
-            MutableBatchNorm2d(C_out, affine=affine),
         )
 
 
@@ -377,28 +332,6 @@ class UniversialInvertedResidual(nn.Sequential):
         else:
             return super().forward(x)
 
-class DilSepConv(nn.Sequential):
-
-    def __init__(self, C_in, C_out, kernel_size, stride, padding, dilation, affine=True):
-        super().__init__(
-            nn.ReLU(inplace=False),
-            MutableConv2d(
-                C_in, C_in, kernel_size=kernel_size, stride=stride,
-                padding=padding, dilation=dilation, groups=C_in, bias=False
-            ),
-            MutableConv2d(C_in, C_in, kernel_size=1, padding=0, bias=False),
-            MutableBatchNorm2d(C_in, affine=affine),
-            SqueezeExcite(C_in, C_in),
-            nn.ReLU(inplace=False),
-            MutableConv2d(
-                C_in, C_in, kernel_size=kernel_size, stride=1,
-                padding=padding, dilation=dilation, groups=C_in, bias=False
-            ),
-            MutableConv2d(C_in, C_out, kernel_size=1, padding=0, bias=False),
-            MutableBatchNorm2d(C_out, affine=affine),
-        )
-
-
 class Zero(nn.Module):
 
     def __init__(self, stride):
@@ -430,6 +363,8 @@ class FactorizedReduce(nn.Module):
         out = torch.cat([self.conv_1(x), self.conv_2(y[:, :, 1:, 1:])], dim=1)
         out = self.bn(out)
         return out
+    
+
 class AuxiliaryHead(nn.Module):
     def __init__(self, C: int, num_labels: int, dataset: Literal['imagenet', 'cifar']):
         super().__init__()
@@ -455,6 +390,8 @@ class AuxiliaryHead(nn.Module):
         x = self.features(x)
         x = self.classifier(x.view(x.size(0), -1))
         return x
+    
+
 class CellPreprocessor(nn.Module):
     """
     Aligning the shape of predecessors.
@@ -548,7 +485,7 @@ class CellBuilder:
 
         ops_factory: Dict[str, Callable[[int, int, Optional[int]], nn.Module]] = {}
         for op in self.op_candidates:
-            if is_reduction_cell and (op == 'kan' or op == 'ffn'):
+            if is_reduction_cell and (op == 'kan_hswish' or op =='kan_relu6' or op == 'kan_silu' or op == 'ffn'):
                 continue
             ops_factory[op] = partial(self.op_factory, op=op, channels=cast(int, self.C), is_reduction_cell=is_reduction_cell)
 
@@ -820,12 +757,14 @@ class NDS(ModelSpace):
             assert isinstance(self.stages[2], nn.Sequential), 'Auxiliary loss can only be enabled in retrain mode.'
             self.auxiliary_head = AuxiliaryHead(C_to_auxiliary, self.num_labels, dataset=self.dataset)  # type: ignore
 
+
         self.global_pooling = nn.AdaptiveAvgPool2d((1, 1))
-        self.classifier = MutableLinear(cast(int, C_prev), self.num_labels)
         self.classifier = LayerChoice({
             "mlp":MutableLinear(cast(int, C_prev), self.num_labels),
             "kan":KanWarapper(cast(int, C_prev), self.num_labels,base_activation=nn.Softmax)
         }, label='classifier')
+
+
     def forward(self, inputs):
         if self.dataset == 'imagenet':
             s0 = self.stem0(inputs)
@@ -908,15 +847,12 @@ class MKNAS(NDS):
     MKNAS_OPS = [
         'avg_pool_3x3',
         'max_pool_3x3',
-        'avg_pool_5x5',
-        'max_pool_5x5',
         'skip_connect',
-        'sep_conv_3x3',
-        'dil_conv_3x3',
+        'zero',
         'conv_3x3',
-        'conv_1x1',
-        'dil_sep_conv_3x3',
-        'kan',
+        'kan_hswish',
+        'kan_relu6',
+        'kan_silu'
         'extra_dw',
         'invert_bottleneck',
         'conv_next',
