@@ -53,28 +53,28 @@ OPS = {
         UniversialInvertedResidual(
             C,C,2,3, stride,
             squeeze_excite=cast(Callable[[MaybeIntChoice, MaybeIntChoice], nn.Module], 
-                partial(_se_or_skip, optional=False, se_from_exp=True, label=f's0_i0_se')),
+                partial(_se_or_skip, optional=False, se_from_exp=True, label=f'extra_dw')),
             first_conv=True, second_conv=True
                 ),
     'invert_bottleneck': lambda C, stride, affine:
         UniversialInvertedResidual(
             C,C,2,3, stride,
             squeeze_excite=cast(Callable[[MaybeIntChoice, MaybeIntChoice], nn.Module], 
-                partial(_se_or_skip, optional=False, se_from_exp=True, label=f's0_i0_se')),
+                partial(_se_or_skip, optional=False, se_from_exp=True, label=f'ib')),
             first_conv=False, second_conv=True
                 ),
     'conv_next': lambda C, stride, affine:
         UniversialInvertedResidual(
             C,C,2,3, stride,
             squeeze_excite=cast(Callable[[MaybeIntChoice, MaybeIntChoice], nn.Module], 
-                partial(_se_or_skip, optional=False, se_from_exp=True, label=f's0_i0_se')),
+                partial(_se_or_skip, optional=False, se_from_exp=True, label=f'conv_next')),
             first_conv=True, second_conv=False
                 ),
     'ffn': lambda C, stride, affine:
         UniversialInvertedResidual(
             C,C,2,3, stride,
             squeeze_excite=cast(Callable[[MaybeIntChoice, MaybeIntChoice], nn.Module], 
-                partial(_se_or_skip, optional=False, se_from_exp=True, label=f's0_i0_se')),
+                partial(_se_or_skip, optional=False, se_from_exp=True, label=f'ffn')),
             first_conv=False, second_conv=False
                 ), 
    
@@ -465,7 +465,7 @@ class CellPreprocessor(nn.Module):
 
     def __init__(self, C_pprev: MaybeIntChoice, C_prev: MaybeIntChoice, C: MaybeIntChoice, last_cell_reduce: bool) -> None:
         super().__init__()
-        last_cell_reduce = False
+
         if last_cell_reduce:
             self.pre0 = FactorizedReduce(cast(int, C_pprev), cast(int, C))
         else:
@@ -479,7 +479,6 @@ class CellPreprocessor(nn.Module):
         prev = self.pre1(prev)
 
         return [pprev, prev]
-
 
 class CellPostprocessor(nn.Module):
     """
@@ -549,7 +548,7 @@ class CellBuilder:
 
         ops_factory: Dict[str, Callable[[int, int, Optional[int]], nn.Module]] = {}
         for op in self.op_candidates:
-            if is_reduction_cell and (op == 'kan' or op == "ffn"):
+            if is_reduction_cell and (op == 'kan' or op == 'ffn'):
                 ops_factory[op] = partial(self.op_factory, op=op, channels=cast(int, self.C), is_reduction_cell=is_reduction_cell)
 
         cell = Cell(ops_factory, self.num_nodes, self.num_ops_per_node, self.num_predecessors, self.merge_op,
@@ -561,6 +560,7 @@ class CellBuilder:
         self.C_in = self.C * len(cell.output_node_indices)
         self.last_cell_reduce = is_reduction_cell
         self._expect_idx += 1
+
         return cell
 
 class NDSStage(Repeat):
