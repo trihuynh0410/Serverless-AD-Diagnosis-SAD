@@ -527,7 +527,7 @@ class CellBuilder:
         if is_reduction_cell and (
             input_index is None or input_index < self.num_predecessors
         ):  # could be none when constructing search space
-            stride = 1
+            stride = 2
         else:
             stride = 1
         operation = OPS[op](channels, stride, True)
@@ -731,7 +731,7 @@ class NDS(ModelSpace):
         self.width = width
         self.num_cells = num_cells
         self.dataset = dataset
-        self.num_labels = 10 if dataset == 'cifar' else 1000
+        self.num_labels = 3
         self.auxiliary_loss = auxiliary_loss
         self.drop_path_prob = drop_path_prob
 
@@ -821,7 +821,10 @@ class NDS(ModelSpace):
 
         self.global_pooling = nn.AdaptiveAvgPool2d((1, 1))
         self.classifier = MutableLinear(cast(int, C_prev), self.num_labels)
-
+        self.classifier = LayerChoice({
+            "mlp":MutableLinear(cast(int, C_prev), self.num_labels),
+            "kan":KanWarapper(cast(int, C_prev), self.num_labels,base_activation=nn.Softmax)
+        }, label='classifier')
     def forward(self, inputs):
         if self.dataset == 'imagenet':
             s0 = self.stem0(inputs)
