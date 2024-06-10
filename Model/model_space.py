@@ -852,7 +852,7 @@ class MKNAS(NDS):
         'conv_3x3',
         'kan_hswish',
         'kan_relu6',
-        'kan_silu'
+        'kan_silu',
         'extra_dw',
         'invert_bottleneck',
         'conv_next',
