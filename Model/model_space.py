@@ -848,7 +848,7 @@ class MKNAS(NDS):
         'avg_pool_3x3',
         'max_pool_3x3',
         'skip_connect',
-        'zero',
+        'none',
         'conv_3x3',
         'kan_hswish',
         'kan_relu6',
