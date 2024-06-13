@@ -431,8 +431,11 @@ class AuxiliaryHead(nn.Module):
 
     def forward(self, x, num_images, num_slices_per_image):
             x = self.features(x)
+            #
             # x = self.classifier(x.view(x.size(0), -1))
+            
             x = x.view(num_images, num_slices_per_image, -1).mean(1)  # Reshape and average over slices
+
             x = self.classifier(x)
             return x
     
@@ -804,11 +807,14 @@ class NDS(ModelSpace):
 
 
         self.global_pooling = nn.AdaptiveAvgPool2d((1, 1))
-        self.classifier = LayerChoice({
-            "mlp":MutableLinear(cast(int, C_prev), self.num_labels),
-            "kan":KanWarapper(cast(int, C_prev), self.num_labels,base_activation=nn.Softmax)
-        }, label='classifier')
-
+        self.classifier1 = LayerChoice({
+            "mlp_1":MutableLinear(cast(int, C_prev), self.num_labels),
+            "kan_1":KanWarapper(cast(int, C_prev), self.num_labels,base_activation=nn.Softmax)
+        }, label='classifier1')
+        self.classifier2 = LayerChoice({
+            "mlp_2":MutableLinear(self.num_labels, self.num_labels),
+            "kan_2":KanWarapper(self.num_labels, self.num_labels, base_activation=nn.Softmax)
+        }, label='classifier2')
 
     def forward(self, inputs):
         num_images, num_slices_per_image, _, height, width = inputs.size()
@@ -831,18 +837,26 @@ class NDS(ModelSpace):
                     # auxiliary loss is attached to the first cell of the last stage.
                     s0, s1 = block([s0, s1])
                     if block_idx == 0:
+                        # Approach 1: treat each slice individually, not rcm to used unless the 2 3 is underfit, cant do nas
                         # logits_aux = self.auxiliary_head(s1)
                         logits_aux = self.auxiliary_head(s1, num_images, num_slices_per_image)
             else:
                 s0, s1 = stage([s0, s1])
 
-        # out = self.global_pooling(s1)
-        # logits = self.classifier(out.view(out.size(0), -1))
         out = self.global_pooling(s1)
+        # Approach 1: treat each slice individually, not rcm to used unless the 2 3 is underfit, cant do nas
+        #logits = self.classifier(out.view(out.size(0), -1))
         
-        # Reshape the output to (num_images, num_slices_per_image, -1) and average over slices
-        logits = self.classifier(out.view(num_images, num_slices_per_image, -1).mean(1)) 
+        # Approach 2: Reshape the output to (num_images, num_slices_per_image, -1) and average over slices each 3d image
+        # This help we get feature of each 3d image, then go to softmax
+        # logits = self.classifier(out.view(num_images, num_slices_per_image, -1).mean(1)) 
         
+        # Approach 3: Put the output to get the proba of each slice, 
+        # then put those proba of each slice to softmax once again to get proba of each 3d image
+        
+        logits_per_slice = self.classifier1(out.view(num_images, num_slices_per_image, -1))
+        logits = self.classifier2(logits_per_slice.view(num_images, -1))
+
         if self.training and self.auxiliary_loss:
             return logits, logits_aux  # type: ignore
         else:
@@ -907,10 +921,9 @@ class MKNAS(NDS):
         'max_pool_3x3',
         'skip_connect',
         'none',
+        'conv_3x3',
         'sep_conv_3x3',
-        'sep_conv_5x5',
-        'dil_conv_5x5',
-        'dil_conv_5x5',
+        'dil_conv_3x3',
         'kan_hswish',
         'kan_relu6',
         'kan_silu',
