@@ -4,14 +4,17 @@ from typing import Tuple, List, Union, Iterable, Literal, Dict, Callable, Option
 import torch
 from torch import nn
 
-from nni.nas.oneshot.pytorch.supermodule.sampling import PathSamplingRepeat
-from nni.nas.oneshot.pytorch.supermodule.differentiable import DifferentiableMixedRepeat
 import nni
 from nni.mutable import MutableExpression, Sample
+from nni.nas.oneshot.pytorch.supermodule.sampling import PathSamplingRepeat
+from nni.nas.oneshot.pytorch.supermodule.differentiable import DifferentiableMixedRepeat
 from nni.nas.nn.pytorch import ModelSpace, LayerChoice, Repeat, Cell, MutableConv2d, MutableBatchNorm2d, MutableLinear, model_context
 from nni.nas.hub.pytorch.utils.nn import DropPath
+
 from kan import *
+
 MaybeIntChoice = Union[int, MutableExpression]
+
 OPS = {
     'none': lambda C, stride, affine:
         Zero(stride),
@@ -33,6 +36,14 @@ OPS = {
             MutableConv2d(C, C, 3, stride=stride, padding=1, bias=False),
             MutableBatchNorm2d(C, affine=affine)
         ),
+    'sep_conv_3x3': lambda C, stride, affine:
+        SepConv(C, C, 3, stride, 1, affine=affine),
+    'sep_conv_5x5': lambda C, stride, affine:
+        SepConv(C, C, 5, stride, 2, affine=affine),
+    'dil_conv_3x3': lambda C, stride, affine:
+        DilConv(C, C, 3, stride, 2, 2, affine=affine),
+    'dil_conv_5x5': lambda C, stride, affine:
+        DilConv(C, C, 5, stride, 4, 2, affine=affine),
     'kan_hswish': lambda C, stride, affine:
         KanWarapper(C,C,base_activation=nn.Hardswish),
     'kan_relu6': lambda C, stride, affine:
@@ -80,7 +91,6 @@ class KanWarapper(nn.Module):
         x = self.to_last_dim(x)
         x = self.proj_func(x)
         x = self.to_first_dim(x)
-        # print("x kan", x.shape)
         return x
 
     @staticmethod
@@ -364,6 +374,39 @@ class FactorizedReduce(nn.Module):
         out = self.bn(out)
         return out
     
+class DilConv(nn.Sequential):
+
+    def __init__(self, C_in, C_out, kernel_size, stride, padding, dilation, affine=True):
+        super().__init__(
+            nn.ReLU(inplace=False),
+            MutableConv2d(
+                C_in, C_in, kernel_size=kernel_size, stride=stride,
+                padding=padding, dilation=dilation, groups=C_in, bias=False
+            ),
+            MutableConv2d(C_in, C_out, kernel_size=1, padding=0, bias=False),
+            MutableBatchNorm2d(C_out, affine=affine),
+        )
+
+
+class SepConv(nn.Sequential):
+
+    def __init__(self, C_in, C_out, kernel_size, stride, padding, affine=True):
+        super().__init__(
+            nn.ReLU(inplace=False),
+            MutableConv2d(
+                C_in, C_in, kernel_size=kernel_size, stride=stride,
+                padding=padding, groups=C_in, bias=False
+            ),
+            MutableConv2d(C_in, C_in, kernel_size=1, padding=0, bias=False),
+            MutableBatchNorm2d(C_in, affine=affine),
+            nn.ReLU(inplace=False),
+            MutableConv2d(
+                C_in, C_in, kernel_size=kernel_size, stride=1,
+                padding=padding, groups=C_in, bias=False
+            ),
+            MutableConv2d(C_in, C_out, kernel_size=1, padding=0, bias=False),
+            MutableBatchNorm2d(C_out, affine=affine),
+        )
 
 class AuxiliaryHead(nn.Module):
     def __init__(self, C: int, num_labels: int, dataset: Literal['imagenet', 'cifar']):
@@ -386,10 +429,12 @@ class AuxiliaryHead(nn.Module):
         )
         self.classifier = MutableLinear(768, num_labels)
 
-    def forward(self, x):
-        x = self.features(x)
-        x = self.classifier(x.view(x.size(0), -1))
-        return x
+    def forward(self, x, num_images, num_slices_per_image):
+            x = self.features(x)
+            # x = self.classifier(x.view(x.size(0), -1))
+            x = x.view(num_images, num_slices_per_image, -1).mean(1)  # Reshape and average over slices
+            x = self.classifier(x)
+            return x
     
 
 class CellPreprocessor(nn.Module):
@@ -766,6 +811,13 @@ class NDS(ModelSpace):
 
 
     def forward(self, inputs):
+        num_images, num_slices_per_image, height, width = inputs.size()
+        if self.dataset == 'imagenet':
+            s0 = self.stem0(inputs.view(-1, 1, height, width))  # Flatten batch and channel dimensions
+            s1 = self.stem1(s0)
+        else:
+            s0 = s1 = self.stem(inputs.view(-1, 1, height, width))  # Flatten batch and channel dimensions
+        
         if self.dataset == 'imagenet':
             s0 = self.stem0(inputs)
             s1 = self.stem1(s0)
@@ -779,12 +831,18 @@ class NDS(ModelSpace):
                     # auxiliary loss is attached to the first cell of the last stage.
                     s0, s1 = block([s0, s1])
                     if block_idx == 0:
-                        logits_aux = self.auxiliary_head(s1)
+                        # logits_aux = self.auxiliary_head(s1)
+                        logits_aux = self.auxiliary_head(s1, num_images, num_slices_per_image)
             else:
                 s0, s1 = stage([s0, s1])
 
+        # out = self.global_pooling(s1)
+        # logits = self.classifier(out.view(out.size(0), -1))
         out = self.global_pooling(s1)
-        logits = self.classifier(out.view(out.size(0), -1))
+        
+        # Reshape the output to (num_images, num_slices_per_image, -1) and average over slices
+        logits = self.classifier(out.view(num_images, num_slices_per_image, -1).mean(1)) 
+        
         if self.training and self.auxiliary_loss:
             return logits, logits_aux  # type: ignore
         else:
@@ -849,7 +907,10 @@ class MKNAS(NDS):
         'max_pool_3x3',
         'skip_connect',
         'none',
-        'conv_3x3',
+        'sep_conv_3x3',
+        'sep_conv_5x5',
+        'dil_conv_5x5',
+        'dil_conv_5x5',
         'kan_hswish',
         'kan_relu6',
         'kan_silu',
