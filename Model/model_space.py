@@ -811,18 +811,18 @@ class NDS(ModelSpace):
 
 
     def forward(self, inputs):
-        num_images, num_slices_per_image, height, width = inputs.size()
+        num_images, num_slices_per_image, _, height, width = inputs.size()
         if self.dataset == 'imagenet':
             s0 = self.stem0(inputs.view(-1, 1, height, width))  # Flatten batch and channel dimensions
             s1 = self.stem1(s0)
         else:
             s0 = s1 = self.stem(inputs.view(-1, 1, height, width))  # Flatten batch and channel dimensions
         
-        if self.dataset == 'imagenet':
-            s0 = self.stem0(inputs)
-            s1 = self.stem1(s0)
-        else:
-            s0 = s1 = self.stem(inputs)
+        # if self.dataset == 'imagenet':
+        #     s0 = self.stem0(inputs)
+        #     s1 = self.stem1(s0)
+        # else:
+        #     s0 = s1 = self.stem(inputs)
 
         for stage_idx, stage in enumerate(self.stages):
             if stage_idx == 2 and self.auxiliary_loss and self.training:
