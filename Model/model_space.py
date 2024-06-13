@@ -846,15 +846,11 @@ class NDS(ModelSpace):
         out = self.global_pooling(s1)
         # Approach 1: treat each slice individually, not rcm to used unless the 2 3 is underfit, cant do nas
         #logits = self.classifier(out.view(out.size(0), -1))
-        
-        # Approach 2: Reshape the output to (num_images, num_slices_per_image, -1) and average over slices each 3d image
-        # This help we get feature of each 3d image, then go to softmax
-        # logits = self.classifier(out.view(num_images, num_slices_per_image, -1).mean(1)) 
-        
-        # Approach 3: Put the output to get the proba of each slice, 
+                
+        # Approach 2: Put the output to get the proba of each slice, 
         # then put those proba of each slice to softmax once again to get proba of each 3d image
-        
-        logits_per_slice = self.classifier1(out.view(num_images, num_slices_per_image, -1))
+        logits_per_slice = self.classifier1(out.view(out.size(0), -1))
+        logits_per_slice = logits_per_slice.view(num_images, num_slices_per_image, -1)
         logits = self.classifier2(logits_per_slice.view(num_images, -1))
 
         if self.training and self.auxiliary_loss:
