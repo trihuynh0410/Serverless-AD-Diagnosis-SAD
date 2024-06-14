@@ -136,7 +136,7 @@ def dataloader_3d_to_2d(data_dir, target_count, train_ratio, val_ratio, batch_si
     return train_loader, val_loader, test_loader
 
 data_dir = '/workspace/data'
-train_loader, val_loader, test_loader = dataloader_3d_to_2d(data_dir, 700, 0.75, 0.15, batch_size=4, num_workers=32)
+train_loader, val_loader, test_loader = dataloader_3d_to_2d(data_dir, 700, 0.75, 0.15, batch_size=8, num_workers=32)
 print(len(train_loader))
 import torch
 from nni.nas.evaluator.pytorch import ClassificationModule
@@ -220,7 +220,7 @@ evaluator = Lightning(
     DartsClassificationModule(1e-3, 3e-5, 0., max_epochs, 3),
     Trainer(
         accelerator='gpu', 
-        devices=1,
+        devices=4,
         max_epochs=max_epochs,
         fast_dev_run=False,
         accumulate_grad_batches = 4,
@@ -238,7 +238,7 @@ with open('exported_arch.json', 'r') as f:
 with model_context(exported_arch):
     final_model = MKNAS(
         width=36,
-        num_cells=20,
+        num_cells=24,
         dataset='imagenet',
         # auxiliary_loss=True, 
         drop_path_prob=0.2
