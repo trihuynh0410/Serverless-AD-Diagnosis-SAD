@@ -223,7 +223,7 @@ evaluator = Lightning(
         devices=4,
         max_epochs=max_epochs,
         fast_dev_run=False,
-        accumulate_grad_batches = 4,
+        accumulate_grad_batches = 2,
         callbacks=[checkpoint_callback, early_stopping_callback],
         overfit_batches=0.4,
         log_every_n_steps=23  # Add callbacks here
@@ -238,7 +238,7 @@ with open('exported_arch.json', 'r') as f:
 with model_context(exported_arch):
     final_model = MKNAS(
         width=36,
-        num_cells=24,
+        num_cells=22,
         dataset='imagenet',
         # auxiliary_loss=True, 
         drop_path_prob=0.2
