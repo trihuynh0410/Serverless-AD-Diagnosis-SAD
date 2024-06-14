@@ -2,7 +2,6 @@
 *.ipynb
 __pycache__/
 *.txt
-*.json
 *.gz
 *.nii
 *.onnx
