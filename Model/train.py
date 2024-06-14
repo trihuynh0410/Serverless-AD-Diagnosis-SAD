@@ -136,7 +136,7 @@ def dataloader_3d_to_2d(data_dir, target_count, train_ratio, val_ratio, batch_si
     return train_loader, val_loader, test_loader
 
 data_dir = '/workspace/data'
-train_loader, val_loader, test_loader = dataloader_3d_to_2d(data_dir, 600, 0.8, 0.1, batch_size=16, num_workers=32)
+train_loader, val_loader, test_loader = dataloader_3d_to_2d(data_dir, 700, 0.75, 0.15, batch_size=16, num_workers=32)
 print(len(train_loader))
 import torch
 from nni.nas.evaluator.pytorch import ClassificationModule
@@ -163,18 +163,18 @@ class DartsClassificationModule(ClassificationModule):
         x, y = batch
         y_hat = self(x)
         loss = self.criterion(y_hat, y)
-        self.log('train_loss', loss, prog_bar=True, logger=True, on_step=True, on_epoch=True, sync_dist=True)
+        self.log('train_loss', loss, prog_bar=True, logger=True, on_epoch=True, sync_dist=True)
         for name, metric in self.metrics.items():
-            self.log('train_' + name, metric(y_hat, y), prog_bar=True, logger=True, on_step=True, on_epoch=True, sync_dist=True)
+            self.log('train_' + name, metric(y_hat, y), prog_bar=True, logger=True, on_epoch=True, sync_dist=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
         x, y = batch
         y_hat = self(x)
         loss = self.criterion(y_hat, y)
-        self.log('val_loss', loss, prog_bar=True, logger=True, on_step=True, on_epoch=True, sync_dist=True)
+        self.log('val_loss', loss, prog_bar=True, logger=True, on_epoch=True, sync_dist=True)
         for name, metric in self.metrics.items():
-            self.log('val_' + name, metric(y_hat, y), prog_bar=True, logger=True, on_step=True, on_epoch=True, sync_dist=True)
+            self.log('val_' + name, metric(y_hat, y), prog_bar=True, logger=True, on_epoch=True, sync_dist=True)
         return loss
     
     def test_step(self, batch, batch_idx):
@@ -217,7 +217,7 @@ early_stopping_callback = EarlyStopping(
 )
 
 evaluator = Lightning(
-    DartsClassificationModule(0.025, 1e-4, 0., max_epochs, 3),
+    DartsClassificationModule(3e-3, 3e-5, 0., max_epochs, 3),
     Trainer(
         accelerator='gpu', 
         devices=4,
@@ -236,7 +236,7 @@ with open('exported_arch.json', 'r') as f:
     exported_arch = json.load(f)
 with model_context(exported_arch):
     final_model = MKNAS(
-        width=16,
+        width=18,
         num_cells=10,
         dataset='imagenet',
         # auxiliary_loss=True, 
