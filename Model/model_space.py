@@ -720,7 +720,7 @@ class NDS(ModelSpace):
         self.num_labels = 3
         self.auxiliary_loss = auxiliary_loss
         self.drop_path_prob = drop_path_prob
-        self.num_slices_per_image
+        self.num_slices_per_image = 6
         # preprocess the specified width and depth
         if isinstance(width, Iterable):
             C = nni.choice('width', list(width))
@@ -895,7 +895,6 @@ class NDS(ModelSpace):
                 self.width,
                 self.num_cells,
                 self.dataset,
-                self.num_slices_per_image,
                 self.auxiliary_loss,
                 self.drop_path_prob
             )
