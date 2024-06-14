@@ -105,7 +105,10 @@ class BalancedAugmentedDataset(Dataset):
                 img_2d = exposure.equalize_hist(img_2d)                   
                 img_2d = torch.tensor(img_2d, dtype=torch.float32).unsqueeze(0)  # Add channel dimension
 
-                img_2d = self.augment_transform(img_2d)
+                if original_idx in self.class_indices[label]:  # Original image                    
+                    pass      
+                else:
+                    img_2d = self.augment_transform(img_2d)
                 slices.append(img_2d)
 
         slices = torch.stack(slices)  # Stack all slices into a single tensor
@@ -127,14 +130,14 @@ def dataloader_3d_to_2d(data_dir, target_count, train_ratio, val_ratio, batch_si
     train_dataset, val_dataset, test_dataset = random_split(balanced_augmented_dataset, [train_size, val_size, test_size])
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
     
     return train_loader, val_loader, test_loader
 
 data_dir = '/workspace/data'
 train_loader, val_loader, test_loader = dataloader_3d_to_2d(data_dir, 600, 0.8, 0.1, batch_size=16, num_workers=32)
-
+print(len(train_loader))
 import torch
 from nni.nas.evaluator.pytorch import ClassificationModule
 
@@ -160,28 +163,27 @@ class DartsClassificationModule(ClassificationModule):
         x, y = batch
         y_hat = self(x)
         loss = self.criterion(y_hat, y)
-        self.log('train_loss', loss, prog_bar=True, logger=True, on_step=True, on_epoch=True)
+        self.log('train_loss', loss, prog_bar=True, logger=True, on_step=True, on_epoch=True, sync_dist=True)
         for name, metric in self.metrics.items():
-            self.log('train_' + name, metric(y_hat, y), prog_bar=True, logger=True, on_step=True, on_epoch=True)
+            self.log('train_' + name, metric(y_hat, y), prog_bar=True, logger=True, on_step=True, on_epoch=True, sync_dist=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
         x, y = batch
         y_hat = self(x)
         loss = self.criterion(y_hat, y)
-        self.log('val_loss', loss, prog_bar=True, logger=True, on_step=True, on_epoch=True)
+        self.log('val_loss', loss, prog_bar=True, logger=True, on_step=True, on_epoch=True, sync_dist=True)
         for name, metric in self.metrics.items():
-            self.log('val_' + name, metric(y_hat, y), prog_bar=True, logger=True, on_step=True, on_epoch=True)
+            self.log('val_' + name, metric(y_hat, y), prog_bar=True, logger=True, on_step=True, on_epoch=True, sync_dist=True)
         return loss
     
     def test_step(self, batch, batch_idx):
         x, y = batch
         y_hat = self(x)
         loss = self.criterion(y_hat, y)
-        self.log('test_loss', loss, prog_bar=True, logger=True, on_step=True, on_epoch=True)
+        self.log('test_loss', loss, prog_bar=True, logger=True, on_step=True, on_epoch=True, sync_dist=True)
         for name, metric in self.metrics.items():
-            self.log('test_' + name, metric(y_hat, y), prog_bar=True, logger=True, on_step=True, on_epoch=True)
-        return loss
+            self.log('test_' + name, metric(y_hat, y), prog_bar=True, logger=True, on_step=True, on_epoch=True, sync_dist=True)
 
     def on_train_epoch_start(self):
         self.model.set_drop_path_prob(self.model.drop_path_prob * self.current_epoch / self.max_epochs)
@@ -233,8 +235,8 @@ with open('exported_arch.json', 'r') as f:
     exported_arch = json.load(f)
 with model_context(exported_arch):
     final_model = MKNAS(
-        width=12,
-        num_cells=4,
+        width=24,
+        num_cells=12,
         dataset='imagenet',
         # auxiliary_loss=True, 
         drop_path_prob=0.2
