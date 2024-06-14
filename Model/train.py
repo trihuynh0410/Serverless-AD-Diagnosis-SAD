@@ -235,8 +235,8 @@ with open('exported_arch.json', 'r') as f:
     exported_arch = json.load(f)
 with model_context(exported_arch):
     final_model = MKNAS(
-        width=24,
-        num_cells=12,
+        width=16,
+        num_cells=8,
         dataset='imagenet',
         # auxiliary_loss=True, 
         drop_path_prob=0.2
