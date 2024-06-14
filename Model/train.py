@@ -181,9 +181,9 @@ class DartsClassificationModule(ClassificationModule):
         x, y = batch
         y_hat = self(x)
         loss = self.criterion(y_hat, y)
-        self.log('test_loss', loss, prog_bar=True, logger=True, on_step=True, on_epoch=True, sync_dist=True)
+        self.log('test_loss', loss, prog_bar=True, logger=True, on_epoch=True, sync_dist=True)
         for name, metric in self.metrics.items():
-            self.log('test_' + name, metric(y_hat, y), prog_bar=True, logger=True, on_step=True, on_epoch=True, sync_dist=True)
+            self.log('test_' + name, metric(y_hat, y), prog_bar=True, logger=True, on_epoch=True, sync_dist=True)
 
     def on_train_epoch_start(self):
         self.model.set_drop_path_prob(self.model.drop_path_prob * self.current_epoch / self.max_epochs)
@@ -224,7 +224,8 @@ evaluator = Lightning(
         max_epochs=max_epochs,
         fast_dev_run=False,
         accumulate_grad_batches = 4,
-        callbacks=[checkpoint_callback, early_stopping_callback]  # Add callbacks here
+        callbacks=[checkpoint_callback, early_stopping_callback],
+        log_every_n_steps=23  # Add callbacks here
     ),
     train_dataloaders=train_loader,
     val_dataloaders=val_loader
@@ -236,7 +237,7 @@ with open('exported_arch.json', 'r') as f:
 with model_context(exported_arch):
     final_model = MKNAS(
         width=16,
-        num_cells=8,
+        num_cells=10,
         dataset='imagenet',
         # auxiliary_loss=True, 
         drop_path_prob=0.2
