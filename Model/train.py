@@ -7,6 +7,32 @@ import numpy as np
 from torchvision import transforms
 from torchvision.datasets import DatasetFolder
 from skimage import exposure
+import os
+import shutil
+
+# Define the base directory
+data_dir = '/workspace/data'
+
+# Define class directories
+class_dirs = ['CN', 'MCI', 'Mild']
+for class_dir in class_dirs:
+    os.makedirs(os.path.join(data_dir, class_dir), exist_ok=True)
+
+# List all files in the base directory
+for filename in os.listdir(data_dir):
+    # Check if the file has the correct format and is not a directory
+    if filename.endswith('.nii.gz') and os.path.isfile(os.path.join(data_dir, filename)):
+        # Determine the class from the prefix
+        class_prefix = filename.split('_')[0]
+        if class_prefix in class_dirs:
+            # Define source and destination paths
+            src_path = os.path.join(data_dir, filename)
+            dest_path = os.path.join(data_dir, class_prefix, filename)
+            # Move the file
+            shutil.move(src_path, dest_path)
+            print(f"Moved {src_path} to {dest_path}")
+        else:
+            print(f"Skipping {filename}, unknown class prefix")
 
 class AugmentTransform:
     def __init__(self):
