@@ -63,5 +63,6 @@
     "reduce/input_5_1": [
         1
     ],
-    "classifier": "kan"
+    "classifier1": "kan_1",
+    "classifier2": "kan_2"
 }
