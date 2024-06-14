@@ -136,7 +136,7 @@ def dataloader_3d_to_2d(data_dir, target_count, train_ratio, val_ratio, batch_si
     return train_loader, val_loader, test_loader
 
 data_dir = '/workspace/data'
-train_loader, val_loader, test_loader = dataloader_3d_to_2d(data_dir, 700, 0.75, 0.15, batch_size=8, num_workers=32)
+train_loader, val_loader, test_loader = dataloader_3d_to_2d(data_dir, 700, 0.75, 0.15, batch_size=6, num_workers=32)
 print(len(train_loader))
 import torch
 from nni.nas.evaluator.pytorch import ClassificationModule
@@ -212,7 +212,7 @@ checkpoint_callback = ModelCheckpoint(
 # Define an early stopping callback
 early_stopping_callback = EarlyStopping(
     monitor='val_loss',  # Monitor validation loss
-    patience=10,  # Number of epochs to wait before stopping training
+    patience=20,  # Number of epochs to wait before stopping training
     mode='min'  # Minimize validation loss
 )
 
