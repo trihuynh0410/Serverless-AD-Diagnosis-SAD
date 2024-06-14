@@ -720,7 +720,7 @@ class NDS(ModelSpace):
         self.num_labels = 3
         self.auxiliary_loss = auxiliary_loss
         self.drop_path_prob = drop_path_prob
-
+        self.num_slices_per_image
         # preprocess the specified width and depth
         if isinstance(width, Iterable):
             C = nni.choice('width', list(width))
@@ -807,17 +807,22 @@ class NDS(ModelSpace):
 
 
         self.global_pooling = nn.AdaptiveAvgPool2d((1, 1))
+        # self.classifier = LayerChoice({
+        #     "mlp":MutableLinear(cast(int, C_prev), self.num_labels),
+        #     "kan":KanWarapper(cast(int, C_prev), self.num_labels,base_activation=nn.Softmax)
+        # }, label='classifier')
         self.classifier1 = LayerChoice({
             "mlp_1":MutableLinear(cast(int, C_prev), self.num_labels),
-            "kan_1":KanWarapper(cast(int, C_prev), self.num_labels,base_activation=nn.Softmax)
+            "kan_1":KanWarapper(cast(int, C_prev), self.num_labels,base_activation=nn.Hardtanh)
         }, label='classifier1')
         self.classifier2 = LayerChoice({
-            "mlp_2":MutableLinear(self.num_labels, self.num_labels),
-            "kan_2":KanWarapper(self.num_labels, self.num_labels, base_activation=nn.Softmax)
+            "mlp_2":MutableLinear(self.num_labels*self.num_slices_per_image, self.num_labels),
+            "kan_2":KanWarapper(self.num_labels*self.num_slices_per_image, self.num_labels, base_activation=nn.Softmax)
         }, label='classifier2')
 
     def forward(self, inputs):
-        num_images, num_slices_per_image, _, height, width = inputs.size()
+        num_images, num_slices_per_image, height, width = inputs.size()
+        self.num_slices_per_image = num_slices_per_image
         if self.dataset == 'imagenet':
             s0 = self.stem0(inputs.view(-1, 1, height, width))  # Flatten batch and channel dimensions
             s1 = self.stem1(s0)
@@ -845,7 +850,7 @@ class NDS(ModelSpace):
 
         out = self.global_pooling(s1)
         # Approach 1: treat each slice individually, not rcm to used unless the 2 3 is underfit, cant do nas
-        #logits = self.classifier(out.view(out.size(0), -1))
+        # logits = self.classifier(out.view(out.size(0), -1))
                 
         # Approach 2: Put the output to get the proba of each slice, 
         # then put those proba of each slice to softmax once again to get proba of each 3d image
@@ -890,6 +895,7 @@ class NDS(ModelSpace):
                 self.width,
                 self.num_cells,
                 self.dataset,
+                self.num_slices_per_image,
                 self.auxiliary_loss,
                 self.drop_path_prob
             )
@@ -916,7 +922,6 @@ class MKNAS(NDS):
         'avg_pool_3x3',
         'max_pool_3x3',
         'skip_connect',
-        'none',
         'conv_3x3',
         'sep_conv_3x3',
         'dil_conv_3x3',
