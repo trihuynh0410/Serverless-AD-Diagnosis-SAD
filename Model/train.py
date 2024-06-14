@@ -123,10 +123,10 @@ full_dataset = DatasetFolder(
     extensions='.nii.gz'
 )
 
-target_count = 200
+target_count = 700
 balanced_augmented_dataset = BalancedAugmentedDataset(full_dataset, target_count)
 
-train_ratio = 0.5
+train_ratio = 0.8
 train_size = int(train_ratio * len(balanced_augmented_dataset))
 val_size = len(balanced_augmented_dataset) - train_size
 
