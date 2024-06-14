@@ -128,7 +128,7 @@ def dataloader_3d_to_2d(data_dir, target_count, train_ratio, val_ratio, batch_si
     test_size = len(balanced_augmented_dataset) - train_size - val_size
 
     train_dataset, val_dataset, test_dataset = random_split(balanced_augmented_dataset, [train_size, val_size, test_size])
-
+    print("datasetlen",len(train_dataset))
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
