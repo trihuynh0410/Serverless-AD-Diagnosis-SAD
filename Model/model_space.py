@@ -821,7 +821,7 @@ class NDS(ModelSpace):
         }, label='classifier2')
 
     def forward(self, inputs):
-        num_images, num_slices_per_image, height, width = inputs.size()
+        num_images, num_slices_per_image, _, height, width = inputs.size()
         self.num_slices_per_image = num_slices_per_image
         if self.dataset == 'imagenet':
             s0 = self.stem0(inputs.view(-1, 1, height, width))  # Flatten batch and channel dimensions
