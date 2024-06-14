@@ -34,10 +34,20 @@ for filename in os.listdir(data_dir):
         else:
             print(f"Skipping {filename}, unknown class prefix")
 
+import torch
+from torch.utils.data import Dataset, random_split
+from nni.nas.evaluator.pytorch import DataLoader
+
+import random
+import nibabel as nib
+import numpy as np
+from torchvision import transforms
+from torchvision.datasets import DatasetFolder
+
 class AugmentTransform:
     def __init__(self):
         self.transforms = transforms.Compose([
-            transforms.RandomRotation(20),
+            transforms.RandomRotation(10),
             transforms.RandomHorizontalFlip(),
             transforms.RandomVerticalFlip(),
         ])
@@ -46,13 +56,15 @@ class AugmentTransform:
         return self.transforms(img)
 
 class BalancedAugmentedDataset(Dataset):
-    def __init__(self, dataset, target_count, pad_size=218):
+    def __init__(self, dataset, target_count, pad_size=218, slice_range=(104, 114)):
         self.dataset = dataset
         self.target_count = target_count
         self.class_indices = self._get_class_indices()
         self.augment_transform = AugmentTransform()
         self.balanced_indices = self._balance_classes()
         self.pad_size = pad_size
+        self.slice_range = slice_range
+        self.slices_per_image = 3 * (self.slice_range[1] - self.slice_range[0])
      
     def _get_class_indices(self):
         class_indices = {}
@@ -72,71 +84,57 @@ class BalancedAugmentedDataset(Dataset):
             else:
                 selected_indices = random.sample(indices, self.target_count)
                 balanced_indices.extend(selected_indices)
+        # random.shuffle(balanced_indices)
         return balanced_indices
 
     def __len__(self):
-        return len(self.balanced_indices)
+        return len(self.balanced_indices) * self.slices_per_image
 
     def __getitem__(self, idx):
-        original_idx = self.balanced_indices[idx]
+        img_idx = idx // self.slices_per_image
+        slice_in_image = idx % self.slices_per_image
+        axis_idx = slice_in_image // (self.slice_range[1] - self.slice_range[0])
+        slice_idx = slice_in_image % (self.slice_range[1] - self.slice_range[0])
+
+        original_idx = self.balanced_indices[img_idx]
         img_path, label = self.dataset.samples[original_idx]
         img = nib.load(img_path).get_fdata()
 
         # Pad the image if necessary
         padded_img = np.pad(img, ((0, self.pad_size - img.shape[0]), (0, self.pad_size - img.shape[1]), (0, self.pad_size - img.shape[2])), mode='constant')
-        slices = []
-        for axis_idx in range(3):
-            # Calculate the range where there is data
-            data_range = np.where(padded_img != 0)
-            min_slice, max_slice = np.min(data_range[axis_idx]), np.max(data_range[axis_idx])
-            
-            # Calculate the middle slice
-            middle_slice = min_slice + (max_slice - min_slice) // 2
-            
-            # Take the middle slice and the one next to it for each axis
-            for slice_idx in [middle_slice, middle_slice - 3]:
-                if axis_idx == 0:
-                    img_2d = padded_img[:, :, slice_idx-8]  # Axial slice
-                elif axis_idx == 1:
-                    img_2d = padded_img[:, slice_idx, :]  # Sagittal slice
-                else:
-                    img_2d = padded_img[slice_idx, :, ]  # Coronal slice
-                
-                img_2d = exposure.equalize_hist(img_2d)                   
-                img_2d = torch.tensor(img_2d, dtype=torch.float32).unsqueeze(0)  # Add channel dimension
 
-                if original_idx in self.class_indices[label]:  # Original image                    
-                    pass      
-                else:
-                    img_2d = self.augment_transform(img_2d)
-                slices.append(img_2d)
+        if axis_idx == 0:
+            img_2d = padded_img[:, :, slice_idx - 25 + self.slice_range[0]]  # Axial slice
+        elif axis_idx == 1:
+            img_2d = padded_img[:, slice_idx + self.slice_range[0], :]  # Sagittal slice
+        else:
+            img_2d = padded_img[slice_idx - 5 + self.slice_range[0], :, :]  # Coronal slice
 
-        slices = torch.stack(slices)  # Stack all slices into a single tensor
+        img_2d = torch.tensor(img_2d, dtype=torch.float32).unsqueeze(0)  # Add channel dimension
+        img_2d = self.augment_transform(img_2d)
 
-        return slices, label
-def dataloader_3d_to_2d(data_dir, target_count, train_ratio, val_ratio, batch_size=32, num_workers=32):
-    full_dataset = DatasetFolder(
-        root=data_dir,
-        loader=lambda x: x,
-        extensions='.nii.gz'
-    )
 
-    balanced_augmented_dataset = BalancedAugmentedDataset(full_dataset, target_count)
-
-    train_size = int(train_ratio * len(balanced_augmented_dataset))
-    val_size = int(val_ratio * len(balanced_augmented_dataset))
-    test_size = len(balanced_augmented_dataset) - train_size - val_size
-
-    train_dataset, val_dataset, test_dataset = random_split(balanced_augmented_dataset, [train_size, val_size, test_size])
-    print("datasetlen",len(train_dataset))
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
-    
-    return train_loader, val_loader, test_loader
-
+        return img_2d, label
 data_dir = '/workspace/data'
-train_loader, val_loader, test_loader = dataloader_3d_to_2d(data_dir, 700, 0.75, 0.15, batch_size=4, num_workers=32)
+
+full_dataset = DatasetFolder(
+    root=data_dir, 
+    loader=lambda x: x,
+    extensions='.nii.gz'
+)
+
+target_count = 200
+balanced_augmented_dataset = BalancedAugmentedDataset(full_dataset, target_count)
+
+train_ratio = 0.5
+train_size = int(train_ratio * len(balanced_augmented_dataset))
+val_size = len(balanced_augmented_dataset) - train_size
+
+train_dataset, val_dataset = random_split(balanced_augmented_dataset, [train_size, val_size])
+
+train_loader = DataLoader(train_dataset, batch_size=96, shuffle=True, num_workers=32)
+val_loader = DataLoader(val_dataset, batch_size=96, shuffle=True, num_workers=32)
+
 print(len(train_loader))
 import torch
 from nni.nas.evaluator.pytorch import ClassificationModule
@@ -212,12 +210,12 @@ checkpoint_callback = ModelCheckpoint(
 # Define an early stopping callback
 early_stopping_callback = EarlyStopping(
     monitor='val_loss',  # Monitor validation loss
-    patience=20,  # Number of epochs to wait before stopping training
+    patience=10,  # Number of epochs to wait before stopping training
     mode='min'  # Minimize validation loss
 )
 
 evaluator = Lightning(
-    DartsClassificationModule(1e-3, 3e-5, 0., max_epochs, 3),
+    DartsClassificationModule(0.02, 3e-5, 0., max_epochs, 3),
     Trainer(
         accelerator='gpu', 
         devices=4,
@@ -225,8 +223,8 @@ evaluator = Lightning(
         fast_dev_run=False,
         accumulate_grad_batches = 2,
         callbacks=[checkpoint_callback, early_stopping_callback],
-        overfit_batches=0.4,
-        log_every_n_steps=23  # Add callbacks here
+        # overfit_batches=0.4,
+        log_every_n_steps=50  # Add callbacks here
     ),
     train_dataloaders=train_loader,
     val_dataloaders=val_loader
