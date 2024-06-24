@@ -3,6 +3,7 @@ import torch.nn.functional as F
 import math
 from nni.nas.nn.pytorch.base import ParametrizedModule
 
+
 class KANLinear(torch.nn.Module):
     def __init__(
         self,
@@ -18,7 +19,7 @@ class KANLinear(torch.nn.Module):
         grid_eps=0.02,
         grid_range=[-1, 1],
     ):
-        super().__init__()
+        super(KANLinear, self).__init__()
         self.in_features = in_features
         self.out_features = out_features
         self.grid_size = grid_size
@@ -151,23 +152,28 @@ class KANLinear(torch.nn.Module):
         )
 
     def forward(self, x: torch.Tensor):
-        assert x.size(-1) == self.in_features
-        original_shape = x.shape
-        x = x.reshape(-1, self.in_features)
+        if x.dim() > 2:
+            original_shape = x.shape
+            print("ori shape kan linear", original_shape)
+            x = x.view(-1, self.in_features)
+        else:
+            original_shape = None
+        assert x.dim() == 2 and x.size(1) == self.in_features
 
         base_output = F.linear(self.base_activation(x), self.base_weight)
         spline_output = F.linear(
-            self.b_splines(x).reshape(x.size(0), -1),
-            self.scaled_spline_weight.reshape(self.out_features, -1),
+            self.b_splines(x).view(x.size(0), -1),
+            self.scaled_spline_weight.view(self.out_features, -1),
         )
-        output = base_output + spline_output
-        
-        output = output.reshape(*original_shape[:-1], self.out_features)
-
-        return output
+        if original_shape is not None:
+            base_output = base_output.view(*original_shape[:-1], self.out_features)
+            spline_output = spline_output.view(*original_shape[:-1], self.out_features)
+        return base_output + spline_output
 
     @torch.no_grad()
     def update_grid(self, x: torch.Tensor, margin=0.01):
+        if x.dim() > 2:
+            x = x.view(-1, self.in_features)
         assert x.dim() == 2 and x.size(1) == self.in_features
         batch = x.size(0)
 
@@ -251,7 +257,7 @@ class KAN(torch.nn.Module):
         grid_eps=0.02,
         grid_range=[-1, 1],
     ):
-        super().__init__()
+        super(KAN, self).__init__()
         self.grid_size = grid_size
         self.spline_order = spline_order
 
@@ -284,5 +290,4 @@ class KAN(torch.nn.Module):
             layer.regularization_loss(regularize_activation, regularize_entropy)
             for layer in self.layers
         )
-
-class MutableKAN(ParametrizedModule, KAN, wraps=KAN): pass
+class Mutable_KAN(ParametrizedModule, KAN, wraps=KAN): pass

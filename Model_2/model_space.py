@@ -1,5 +1,5 @@
 from functools import partial
-from typing import Tuple, List, Union, Iterable, Literal, Dict, Callable, Optional, cast, Type, Iterator
+from typing import Tuple, List, Union, Iterable, Literal, Dict, Callable, Optional, cast
 
 import torch
 from torch import nn
@@ -8,11 +8,13 @@ import nni
 from nni.mutable import MutableExpression, Sample
 from nni.nas.oneshot.pytorch.supermodule.sampling import PathSamplingRepeat
 from nni.nas.oneshot.pytorch.supermodule.differentiable import DifferentiableMixedRepeat
-from nni.nas.nn.pytorch import ModelSpace, LayerChoice, Repeat, Cell, MutableConv2d, MutableBatchNorm2d, MutableLinear, model_context
+from nni.nas.nn.pytorch import ModelSpace, Repeat, Cell, MutableConv2d, MutableBatchNorm2d, model_context
 from nni.nas.hub.pytorch.utils.nn import DropPath
 
-from kan import *
-
+from KANConv import Mutable_KAN_Conv
+from KANLinear import Mutable_KAN
+from MobileNetV4 import _se_or_skip, ConvBNReLU, UniversialInvertedResidual
+from ViT import *
 MaybeIntChoice = Union[int, MutableExpression]
 
 OPS = {
@@ -24,32 +26,6 @@ OPS = {
         nn.MaxPool2d(3, stride=stride, padding=1),
     'skip_connect': lambda C, stride, affine:
         nn.Identity() if stride == 1 else FactorizedReduce(C, C, affine=affine),
-    'conv_1x1': lambda C, stride, affine:
-        nn.Sequential(
-            nn.ReLU(inplace=False),
-            MutableConv2d(C, C, 1, stride=stride, padding=0, bias=False),
-            MutableBatchNorm2d(C, affine=affine)
-        ),
-    'conv_3x3': lambda C, stride, affine:
-        nn.Sequential(
-            nn.ReLU(inplace=False),
-            MutableConv2d(C, C, 3, stride=stride, padding=1, bias=False),
-            MutableBatchNorm2d(C, affine=affine)
-        ),
-    'sep_conv_3x3': lambda C, stride, affine:
-        SepConv(C, C, 3, stride, 1, affine=affine),
-    'sep_conv_5x5': lambda C, stride, affine:
-        SepConv(C, C, 5, stride, 2, affine=affine),
-    'dil_conv_3x3': lambda C, stride, affine:
-        DilConv(C, C, 3, stride, 2, 2, affine=affine),
-    'dil_conv_5x5': lambda C, stride, affine:
-        DilConv(C, C, 5, stride, 4, 2, affine=affine),
-    'kan_hswish': lambda C, stride, affine:
-        KanWarapper(C,C,base_activation=nn.Hardswish),
-    'kan_relu6': lambda C, stride, affine:
-        KanWarapper(C,C,base_activation=nn.ReLU6),
-    'kan_silu': lambda C, stride, affine:
-        KanWarapper(C,C,base_activation=nn.SiLU),    
     'extra_dw': lambda C, stride, affine:
         UniversialInvertedResidual(
             C,C,3,3, stride,
@@ -78,269 +54,9 @@ OPS = {
                 partial(_se_or_skip, optional=False, se_from_exp=True, label=f'ffn')),
             first_conv=False, second_conv=False
                 ), 
-   
 }
 
-class KanWarapper(nn.Module):
-    def __init__(self, in_channel, out_channel, base_activation):
-        super().__init__()
 
-        self.proj_func = MutableKAN([in_channel, in_channel//2, out_channel], base_activation=base_activation)
-
-    def forward(self, x):
-        x = self.to_last_dim(x)
-        x = self.proj_func(x)
-        x = self.to_first_dim(x)
-        return x
-
-    @staticmethod
-    def to_last_dim(t):
-        num_dims = len(t.shape)
-        permute_order = [0] + list(range(2, num_dims)) + [1]
-        return t.permute(*permute_order)
-    
-    @staticmethod
-    def to_first_dim(t):
-        num_dims = len(t.shape)
-        permute_order = [0, num_dims-1] + list(range(1, num_dims-1))
-        return t.permute(*permute_order)
-
-class ReLUConvBN(nn.Sequential):
-
-    def __init__(self, C_in, C_out, kernel_size, stride, padding, affine=True):
-        super().__init__(
-            nn.ReLU(inplace=False),
-            MutableConv2d(
-                C_in, C_out, kernel_size, stride=stride,
-                padding=padding, bias=False
-            ),
-            MutableBatchNorm2d(C_out, affine=affine)
-        )
-
-
-def make_divisible(v: Union[MutableExpression[int], MutableExpression[float], int, float], divisor, min_val=None) -> MaybeIntChoice:
-    """
-    This function is taken from the original tf repo.
-    It ensures that all layers have a channel number that is divisible by 8
-    It can be seen here:
-    https://github.com/tensorflow/models/blob/master/research/slim/nets/mobilenet/mobilenet.py
-    """
-    if min_val is None:
-        min_val = divisor
-    # This should work for both value choices and constants.
-    new_v = MutableExpression.max(min_val, round(v + divisor // 2) // divisor * divisor)
-    # Make sure that round down does not go down by more than 10%.
-    return MutableExpression.condition(new_v < 0.9 * v, new_v + divisor, new_v)
-
-def simplify_sequential(sequentials: List[nn.Module]) -> Iterator[nn.Module]:
-    """
-    Flatten the sequential blocks so that the hierarchy looks better.
-    Eliminate identity modules automatically.
-    """
-    for module in sequentials:
-        if isinstance(module, nn.Sequential):
-            for submodule in module.children():
-                # no recursive expansion
-                if not isinstance(submodule, nn.Identity):
-                    yield submodule
-        else:
-            if not isinstance(module, nn.Identity):
-                yield module
-
-class SqueezeExcite(nn.Module):
-    """Squeeze-and-excite layer.
-
-    We can't use the op from ``torchvision.ops`` because it's not (yet) properly wrapped,
-    and ValueChoice couldn't be processed.
-
-    Reference:
-
-    - https://github.com/rwightman/pytorch-image-models/blob/b7cb8d03/timm/models/efficientnet_blocks.py#L26
-    - https://github.com/d-li14/mobilenetv3.pytorch/blob/3e6938cedcbbc5ee5bc50780ea18e644702d85fc/mobilenetv3.py#L53
-    """
-
-    def __init__(self,
-                 channels: int,
-                 reduction_ratio: float = 0.25,
-                 gate_layer: Optional[Callable[..., nn.Module]] = None,
-                 activation_layer: Optional[Callable[..., nn.Module]] = None):
-        super().__init__()
-
-        rd_channels = make_divisible(channels * reduction_ratio, 8)
-        gate_layer = gate_layer or nn.Hardsigmoid
-        activation_layer = activation_layer or nn.ReLU
-        self.conv_reduce = MutableConv2d(channels, rd_channels, 1, bias=True)
-        self.act1 = activation_layer(inplace=True)
-        self.conv_expand = MutableConv2d(rd_channels, channels, 1, bias=True)
-        self.gate = gate_layer()
-
-    def forward(self, x):
-        x_se = x.mean((2, 3), keepdim=True)
-        x_se = self.conv_reduce(x_se)
-        x_se = self.act1(x_se)
-        x_se = self.conv_expand(x_se)
-        return x * self.gate(x_se)
-
-
-def _se_or_skip(hidden_ch: int, input_ch: int, optional: bool, se_from_exp: bool, label: str) -> nn.Module:
-    ch = hidden_ch if se_from_exp else input_ch
-    if optional:
-        return LayerChoice({
-            'identity': nn.Identity(),
-            'se': SqueezeExcite(ch)
-        }, label=label)
-    else:
-        return SqueezeExcite(ch)
-
-
-def _act_fn(act_alias: Literal['hswish', 'swish', 'relu']) -> Type[nn.Module]:
-    if act_alias == 'hswish':
-        return nn.Hardswish
-    elif act_alias == 'swish':
-        return nn.SiLU
-    elif act_alias == 'relu':
-        return nn.ReLU
-    else:
-        raise ValueError(f'Unsupported act alias: {act_alias}')
-
-class ConvBNReLU(nn.Sequential):
-    """
-    The template for a conv-bn-relu block.
-    """
-
-    def __init__(
-        self,
-        in_channels: MaybeIntChoice,
-        out_channels: MaybeIntChoice,
-        kernel_size: MaybeIntChoice = 3,
-        stride: int = 1,
-        groups: MaybeIntChoice = 1,
-        norm_layer: Optional[Callable[[int], nn.Module]] = None,
-        activation_layer: Optional[Callable[..., nn.Module]] = None,
-        dilation: int = 1,
-    ) -> None:
-        padding = (kernel_size - 1) // 2 * dilation
-        if norm_layer is None:
-            norm_layer = MutableBatchNorm2d
-        if activation_layer is None:
-            activation_layer = nn.ReLU6
-        # If no normalization is used, set bias to True
-        # https://github.com/google-research/google-research/blob/20736344/tunas/rematlib/mobile_model_v3.py#L194
-        norm = norm_layer(cast(int, out_channels))
-        no_normalization = isinstance(norm, nn.Identity)
-        blocks: List[nn.Module] = [
-            MutableConv2d(
-                cast(int, in_channels),
-                cast(int, out_channels),
-                cast(int, kernel_size),
-                stride,
-                cast(int, padding),
-                dilation=dilation,
-                groups=cast(int, groups),
-                bias=no_normalization
-            ),
-            # Normalization, regardless of batchnorm or identity
-            norm,
-            # One pytorch implementation as an SE here, to faithfully reproduce paper
-            # We follow a more accepted approach to put SE outside
-            # Reference: https://github.com/d-li14/mobilenetv3.pytorch/issues/18
-            activation_layer(inplace=True)
-        ]
-
-        super().__init__(*simplify_sequential(blocks))
-
-class UniversialInvertedResidual(nn.Sequential):
-    """
-    An Inverted Residual Block, sometimes called an MBConv Block, is a type of residual block used for image models
-    that uses an inverted structure for efficiency reasons.
-
-    It was originally proposed for the `MobileNetV2 <https://arxiv.org/abs/1801.04381>`__ CNN architecture.
-    It has since been reused for several mobile-optimized CNNs.
-    It follows a narrow -> wide -> narrow approach, hence the inversion.
-    It first widens with a 1x1 convolution, then uses a 3x3 depthwise convolution (which greatly reduces the number of parameters),
-    then a 1x1 convolution is used to reduce the number of channels so input and output can be added.
-
-    This implementation is sort of a mixture between:
-
-    - https://github.com/google-research/google-research/blob/20736344/tunas/rematlib/mobile_model_v3.py#L453
-    - https://github.com/rwightman/pytorch-image-models/blob/b7cb8d03/timm/models/efficientnet_blocks.py#L134
-
-    Parameters
-    ----------
-    in_channels
-        The number of input channels. Can be a value choice.
-    out_channels
-        The number of output channels. Can be a value choice.
-    expand_ratio
-        The ratio of intermediate channels with respect to input channels. Can be a value choice.
-    kernel_size
-        The kernel size of the depthwise convolution. Can be a value choice.
-    stride
-        The stride of the depthwise convolution.
-    squeeze_excite
-        Callable to create squeeze and excitation layer. Take hidden channels and input channels as arguments.
-    norm_layer
-        Callable to create normalization layer. Take input channels as argument.
-    activation_layer
-        Callable to create activation layer. No input arguments.
-    """
-
-    def __init__(
-        self,
-        in_channels: MaybeIntChoice,
-        out_channels: MaybeIntChoice,
-        expand_ratio: Union[float, MutableExpression[float]],
-        kernel_size: MaybeIntChoice = 3,
-        stride: int = 1,
-        squeeze_excite: Optional[Callable[[MaybeIntChoice, MaybeIntChoice], nn.Module]] = None,
-        norm_layer: Optional[Callable[[int], nn.Module]] = None,
-        activation_layer: Optional[Callable[..., nn.Module]] = None,
-        first_conv: bool = False,
-        second_conv: bool = False,
-    ) -> None:
-        super().__init__()
-        self.stride = stride
-        self.out_channels = out_channels
-        assert stride in [1, 2]
-
-        hidden_ch = cast(int, make_divisible(in_channels * expand_ratio, 8))
-
-        # NOTE: this equivalence check (==) does NOT work for ValueChoice, need to use "is"
-        self.has_skip = stride == 1 and in_channels is out_channels
-
-        first_depth = ConvBNReLU(in_channels, in_channels, stride=stride, kernel_size=kernel_size, groups=in_channels,
-                       norm_layer=norm_layer, activation_layer=activation_layer) if first_conv else nn.Identity()
-        if first_conv and second_conv:
-            stride = 1
-        Second_depth = ConvBNReLU(hidden_ch, hidden_ch, stride=stride, kernel_size=kernel_size, groups=hidden_ch,
-                       norm_layer=norm_layer, activation_layer=activation_layer) if second_conv else nn.Identity()
-                
-        layers: List[nn.Module] = [
-            first_depth,
-            # point-wise convolution
-            # NOTE: some paper omit this point-wise convolution when stride = 1.
-            # In our implementation, if this pw convolution is intended to be omitted,
-            # please use SepConv instead.
-            ConvBNReLU(in_channels, hidden_ch, kernel_size=1,
-                       norm_layer=norm_layer, activation_layer=activation_layer),
-            # depth-wise
-            Second_depth,
-            # SE
-            squeeze_excite(
-                cast(int, hidden_ch),
-                cast(int, in_channels)
-            ) if squeeze_excite is not None else nn.Identity(),
-            # pw-linear
-            ConvBNReLU(hidden_ch, out_channels, kernel_size=1, norm_layer=norm_layer, activation_layer=nn.Identity),
-        ]
-
-        super().__init__(*simplify_sequential(layers))
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if self.has_skip:
-            return x + super().forward(x)
-        else:
-            return super().forward(x)
 
 class Zero(nn.Module):
 
@@ -362,81 +78,20 @@ class FactorizedReduce(nn.Module):
         else:   # is a value choice
             assert all(c % 2 == 0 for c in C_out.grid())
         self.relu = nn.ReLU(inplace=False)
-        self.conv_1 = MutableConv2d(C_in, C_out // 2, 1, stride=2, padding=0, bias=False)
-        self.conv_2 = MutableConv2d(C_in, C_out // 2, 1, stride=2, padding=0, bias=False)
+        self.conv_1 = Mutable_KAN_Conv(C_out // 2, (1,1), (2,2))
+        self.conv_2 = Mutable_KAN_Conv(C_out // 2, (1,1), (2,2))
         self.bn = MutableBatchNorm2d(C_out, affine=affine)
+
         self.pad = nn.ConstantPad2d((0, 1, 0, 1), 0)
 
     def forward(self, x):
         x = self.relu(x)
-        y = self.pad(x)
-        out = torch.cat([self.conv_1(x), self.conv_2(y[:, :, 1:, 1:])], dim=1)
-        out = self.bn(out)
+        y = self.pad(x)        
+        conv1_out = self.conv_1(x)
+        conv2_out = self.conv_2(y[:, :, 1:, 1:])    
+        out = torch.cat([conv1_out, conv2_out], dim=1)
+        out = self.bn(out)      
         return out
-    
-class DilConv(nn.Sequential):
-
-    def __init__(self, C_in, C_out, kernel_size, stride, padding, dilation, affine=True):
-        super().__init__(
-            nn.ReLU(inplace=False),
-            MutableConv2d(
-                C_in, C_in, kernel_size=kernel_size, stride=stride,
-                padding=padding, dilation=dilation, groups=C_in, bias=False
-            ),
-            MutableConv2d(C_in, C_out, kernel_size=1, padding=0, bias=False),
-            MutableBatchNorm2d(C_out, affine=affine),
-        )
-
-
-class SepConv(nn.Sequential):
-
-    def __init__(self, C_in, C_out, kernel_size, stride, padding, affine=True):
-        super().__init__(
-            nn.ReLU(inplace=False),
-            MutableConv2d(
-                C_in, C_in, kernel_size=kernel_size, stride=stride,
-                padding=padding, groups=C_in, bias=False
-            ),
-            MutableConv2d(C_in, C_in, kernel_size=1, padding=0, bias=False),
-            MutableBatchNorm2d(C_in, affine=affine),
-            nn.ReLU(inplace=False),
-            MutableConv2d(
-                C_in, C_in, kernel_size=kernel_size, stride=1,
-                padding=padding, groups=C_in, bias=False
-            ),
-            MutableConv2d(C_in, C_out, kernel_size=1, padding=0, bias=False),
-            MutableBatchNorm2d(C_out, affine=affine),
-        )
-
-class AuxiliaryHead(nn.Module):
-    def __init__(self, C: int, num_labels: int, dataset: Literal['imagenet', 'cifar']):
-        super().__init__()
-        if dataset == 'imagenet':
-            # assuming input size 14x14
-            stride = 2
-        elif dataset == 'cifar':
-            stride = 3
-
-        self.features = nn.Sequential(
-            nn.ReLU(inplace=True),
-            nn.AvgPool2d(5, stride=stride, padding=0, count_include_pad=False),
-            MutableConv2d(C, 32, 1, bias=False),
-            MutableBatchNorm2d(32),
-            nn.ReLU(inplace=True),
-            MutableConv2d(32, 128, 2, bias=False),
-            MutableBatchNorm2d(128),
-            nn.ReLU(inplace=True)
-        )
-        self.classifier1 = MutableLinear(128, num_labels)
-        self.classifier2 = MutableLinear(num_labels*6, num_labels)
-    def forward(self, x, num_images, num_slices_per_image):
-            x = self.features(x)
-            #
-            # x = self.classifier(x.view(x.size(0), -1))
-            x = self.classifier1(x.view(x.size(0), -1))
-            x = x.view(num_images, num_slices_per_image, -1)
-            x = self.classifier2(x.view(num_images, -1))
-            return x
     
 
 class CellPreprocessor(nn.Module):
@@ -453,15 +108,14 @@ class CellPreprocessor(nn.Module):
         if last_cell_reduce:
             self.pre0 = FactorizedReduce(cast(int, C_pprev), cast(int, C))
         else:
-            self.pre0 = ReLUConvBN(cast(int, C_pprev), cast(int, C), 1, 1, 0)
-        self.pre1 = ReLUConvBN(cast(int, C_prev), cast(int, C), 1, 1, 0)
+            self.pre0 = ConvBNReLU(cast(int, C_pprev), cast(int, C), 1, 1, 0)
+        self.pre1 = ConvBNReLU(cast(int, C_prev), cast(int, C), 1, 1, 0)
 
     def forward(self, cells):
         assert len(cells) == 2
         pprev, prev = cells
         pprev = self.pre0(pprev)
         prev = self.pre1(prev)
-
         return [pprev, prev]
 
 class CellPostprocessor(nn.Module):
@@ -532,7 +186,7 @@ class CellBuilder:
 
         ops_factory: Dict[str, Callable[[int, int, Optional[int]], nn.Module]] = {}
         for op in self.op_candidates:
-            if is_reduction_cell and (op == 'kan_hswish' or op =='kan_relu6' or op == 'kan_silu' or op == 'ffn'):
+            if is_reduction_cell and op == 'ffn':
                 continue
             ops_factory[op] = partial(self.op_factory, op=op, channels=cast(int, self.C), is_reduction_cell=is_reduction_cell)
 
@@ -583,7 +237,7 @@ class NDSStage(Repeat):
             return FactorizedReduce(self.estimated_out_channels_prev, self.estimated_out_channels)
         elif self.estimated_out_channels_prev is not self.estimated_out_channels:
             # Can't use != here, ValueChoice doesn't support
-            return ReLUConvBN(self.estimated_out_channels_prev, self.estimated_out_channels, 1, 1, 0)
+            return ConvBNReLU(self.estimated_out_channels_prev, self.estimated_out_channels, 1, 1, 0)
         return None
 
 
@@ -721,6 +375,13 @@ class NDS(ModelSpace):
         self.auxiliary_loss = auxiliary_loss
         self.drop_path_prob = drop_path_prob
         self.num_slices_per_image = num_slices_per_image
+        self.patches_num = None
+        self.C_prev = None
+        self.cls_token = None
+        self.pos_embed = None
+        self.transformer = None
+        self.norm = None
+        self.classifier = None
         # preprocess the specified width and depth
         if isinstance(width, Iterable):
             C = nni.choice('width', list(width))
@@ -735,10 +396,10 @@ class NDS(ModelSpace):
         # auxiliary head is different for network targetted at different datasets
         if dataset == 'imagenet':
             self.stem0 = nn.Sequential(
-                MutableConv2d(1, cast(int, C // 2), kernel_size=3, stride=2, padding=1, bias=False),
-                MutableBatchNorm2d(cast(int, C // 2)),
+                # MutableConv2d(1, cast(int, C // 2), kernel_size=3, stride=2, padding=1, bias=False),
+                # MutableBatchNorm2d(cast(int, C // 2)),
                 nn.ReLU(inplace=True),
-                MutableConv2d(cast(int, C // 2), cast(int, C), 3, stride=2, padding=1, bias=False),
+                MutableConv2d(1, cast(int, C), 3, stride=2, padding=1, bias=False),
                 MutableBatchNorm2d(C),
             )
             self.stem1 = nn.Sequential(
@@ -790,25 +451,22 @@ class NDS(ModelSpace):
 
             if stage_idx == 2:
                 C_to_auxiliary = C_prev
-
-        if auxiliary_loss:
-            assert isinstance(self.stages[2], nn.Sequential), 'Auxiliary loss can only be enabled in retrain mode.'
-            self.auxiliary_head = AuxiliaryHead(C_to_auxiliary, self.num_labels, dataset=self.dataset)  # type: ignore
-
-
+        
         self.global_pooling = nn.AdaptiveAvgPool2d((1, 1))
-        # self.classifier = LayerChoice({
-        #     "mlp":MutableLinear(cast(int, C_prev), self.num_labels),
-        #     "kan":KanWarapper(cast(int, C_prev), self.num_labels,base_activation=nn.Softmax)
-        # }, label='classifier')
-        self.classifier1 = LayerChoice({
-            "mlp_1":MutableLinear(cast(int, C_prev), self.num_labels),
-            "kan_1":KanWarapper(cast(int, C_prev), self.num_labels,base_activation=nn.Softmax)
-        }, label='classifier1')
-        self.classifier2 = LayerChoice({
-            "mlp_2":MutableLinear(self.num_labels*self.num_slices_per_image, self.num_labels),
-            "kan_2":KanWarapper(self.num_labels*self.num_slices_per_image, self.num_labels, base_activation=nn.Softmax)
-        }, label='classifier2')
+
+    def update_dynamic_layers(self, new_patches_num, new_C_prev):
+        if self.patches_num != new_patches_num or self.C_prev != new_C_prev:
+            self.patches_num = new_patches_num
+            self.C_prev = new_C_prev
+            self.cls_token = ClassToken(self.C_prev)
+            self.pos_embed = AbsolutePositionEmbedding(self.patches_num + 1, self.C_prev)
+            self.transformer = TransformerEncoderLayer(
+                embed_dim=self.C_prev,
+                num_heads=4,
+                mlp_ratio=2,
+            )
+            self.norm = MutableLayerNorm(self.C_prev)
+            self.classifier = Mutable_KAN([self.C_prev, self.num_labels], base_activation=nn.Softmax)
 
     def forward(self, inputs):
         num_images, num_slices_per_image, _, height, width = inputs.size()
@@ -816,40 +474,23 @@ class NDS(ModelSpace):
         if self.dataset == 'imagenet':
             s0 = self.stem0(inputs.view(-1, 1, height, width))
             s1 = self.stem1(s0)
-        
-        # if self.dataset == 'imagenet':
-        #     s0 = self.stem0(inputs)
-        #     s1 = self.stem1(s0)
-        # else:
-        #     s0 = s1 = self.stem(inputs)
-
         for stage_idx, stage in enumerate(self.stages):
-            if stage_idx == 2 and self.auxiliary_loss and self.training:
-                assert isinstance(stage, nn.Sequential), 'Auxiliary loss is only supported for fixed architecture.'
-                for block_idx, block in enumerate(stage):
-                    # auxiliary loss is attached to the first cell of the last stage.
-                    s0, s1 = block([s0, s1])
-                    if block_idx == 0:
-                        # Approach 1: treat each slice individually, not rcm to used unless the 2 3 is underfit, cant do nas
-                        logits_aux = self.auxiliary_head(s1)
-                        # logits_aux = self.auxiliary_head(s1, num_images, num_slices_per_image)
-            else:
-                s0, s1 = stage([s0, s1])
-
+            s0, s1 = stage([s0, s1])
         out = self.global_pooling(s1)
-        # Approach 1: treat each slice individually, not rcm to used unless the 2 3 is underfit, cant do nas
-        # logits = self.classifier(out.view(out.size(0), -1))
-                
-        # Approach 2: Put the output to get the proba of each slice, 
-        # then put those proba of each slice to softmax once again to get proba of each 3d image
-        logits_per_slice = self.classifier1(out.view(out.size(0), -1))
-        logits_per_slice = logits_per_slice.view(num_images, num_slices_per_image, -1)
-        logits = self.classifier2(logits_per_slice.view(num_images, -1))
 
-        if self.training and self.auxiliary_loss:
-            return logits, logits_aux  # type: ignore
-        else:
-            return logits
+        new_patches_num = num_slices_per_image * height * width
+        new_C_prev = out.size(1)
+        self.update_dynamic_layers(new_patches_num, new_C_prev)
+        out = out.permute(0, 2, 3, 1).view(num_images, new_patches_num, -1)
+        x = self.cls_token(out)
+        x = self.pos_embed(x)
+        x = self.transformer(x)
+        x = self.norm(x)
+        x = torch.mean(x[:, 1:], dim=1)
+        
+        logits = self.classifier(x)
+
+        return logits
 
     @classmethod
     def extra_oneshot_hooks(cls, strategy):
@@ -895,7 +536,7 @@ class NDS(ModelSpace):
         """
         for module in self.modules():
             if isinstance(module, DropPath):
-                module.drop_prob = drop_prob
+                module.drop_prob = self.drop_path_prob
 
 class MKNAS(NDS):
     __doc__ = """Search space proposed in
@@ -910,13 +551,7 @@ class MKNAS(NDS):
         'avg_pool_3x3',
         'max_pool_3x3',
         'skip_connect',
-        'conv_3x3',
         'none',
-        'sep_conv_3x3',
-        'dil_conv_3x3',
-        'kan_hswish',
-        'kan_relu6',
-        'kan_silu',
         'extra_dw',
         'invert_bottleneck',
         'conv_next',

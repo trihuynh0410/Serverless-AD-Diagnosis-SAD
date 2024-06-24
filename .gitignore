@@ -5,3 +5,4 @@ __pycache__/
 *.gz
 *.nii
 *.onnx
+*.nii.gz
