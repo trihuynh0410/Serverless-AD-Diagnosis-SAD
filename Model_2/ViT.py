@@ -279,6 +279,7 @@ class TransformerEncoderLayer(nn.Module):
     def maybe_layer_norm(self, layer_norm, x, before=False, after=False):
         assert before ^ after
         if after ^ self.normalize_before:
+            layer_norm.to(x.device)
             return layer_norm(x)
         else:
             return x
@@ -334,7 +335,8 @@ class ClassToken(ParametrizedModule):
         nn.init.trunc_normal_(self.cls_token, std=.02)
 
     def forward(self, x):
-        return torch.cat((self.cls_token.expand(x.shape[0], -1, -1), x), dim=1)
+        cls_token = self.cls_token.expand(x.shape[0], -1, -1).to(x.device)
+        return torch.cat((cls_token, x), dim=1)
 
     def _shape_forward(self, x: ShapeTensor) -> MutableShape:
         assert x.real_shape is not None
@@ -351,7 +353,7 @@ class AbsolutePositionEmbedding(ParametrizedModule):
         nn.init.trunc_normal_(self.pos_embed, std=.02)
 
     def forward(self, x):
-        return x + self.pos_embed
+        return x + self.pos_embed.to(x.device)
 
     def _shape_forward(self, x: ShapeTensor) -> MutableShape:
         assert x.real_shape is not None

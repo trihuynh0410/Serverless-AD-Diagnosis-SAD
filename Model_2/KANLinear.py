@@ -3,6 +3,7 @@ import torch.nn.functional as F
 import math
 from nni.nas.nn.pytorch.base import ParametrizedModule
 from torch import nn
+
 class KANLinear(torch.nn.Module):
     def __init__(
         self,
@@ -88,7 +89,7 @@ class KANLinear(torch.nn.Module):
         assert x.dim() == 2 and x.size(1) == self.in_features
 
         grid: torch.Tensor = (
-            self.grid
+            self.grid.to(x.device)
         )  # (in_features, grid_size + 2 * spline_order + 1)
         x = x.unsqueeze(-1)
         bases = ((x >= grid[:, :-1]) & (x < grid[:, 1:])).to(x.dtype)
