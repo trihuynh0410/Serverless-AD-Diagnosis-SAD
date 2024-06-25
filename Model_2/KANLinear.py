@@ -129,22 +129,14 @@ class KANLinear(torch.nn.Module):
             0, 1
         )  # (in_features, batch_size, grid_size + spline_order)
         B = y.transpose(0, 1)  # (in_features, batch_size, out_features)
-        if A.dtype != B.dtype:
-            B = B.to(A.dtype)
-        solution = torch.zeros((A.shape[0], A.shape[2], B.shape[2]), dtype=A.dtype, device=A.device)
 
-        for i in range(A.shape[0]): 
-            # QR decomposition of A[i] (batch_size, grid_size + spline_order)
-            Q, R = torch.linalg.qr(A[i])
-            # Compute Q^T B[i] (grid_size + spline_order, out_features)
-            QtB = torch.matmul(Q.transpose(-2, -1), B[i]).to(A.dtype)
-            R = R.to(A.dtype)
-            # Solve R solution[i] = QtB for solution[i]
-            solution[i] = torch.linalg.lstsq(R, QtB).solution
+        solution = torch.linalg.lstsq(
+            A, B
+        ).solution
 
         result = solution.permute(
             2, 0, 1
-        ).to(x.dtype)  # (out_features, in_features, grid_size + spline_order)
+        )  # (out_features, in_features, grid_size + spline_order)
 
         assert result.size() == (
             self.out_features,
