@@ -93,6 +93,7 @@ class RelativePositionSelfAttention(MutableModule):
         qk_scale: float | None = None,
         rpe: bool = False,
         rpe_length: int = 14,
+        act_fn = torch.nn.ReLU
     ):
         super().__init__()
 
@@ -114,12 +115,12 @@ class RelativePositionSelfAttention(MutableModule):
             raise ValueError('head_dim and num_heads can not be both mutable.')
 
         # Please refer to MixedMultiheadAttention for details.
-        self.q = Mutable_KAN([cast(int, embed_dim), cast(int, head_dim) * num_heads])
-        self.k = Mutable_KAN([cast(int, embed_dim), cast(int, head_dim) * num_heads])
-        self.v = Mutable_KAN([cast(int, embed_dim), cast(int, head_dim) * num_heads])
+        self.q = Mutable_KAN([cast(int, embed_dim), cast(int, head_dim) * num_heads],base_activation=act_fn)
+        self.k = Mutable_KAN([cast(int, embed_dim), cast(int, head_dim) * num_heads],base_activation=act_fn)
+        self.v = Mutable_KAN([cast(int, embed_dim), cast(int, head_dim) * num_heads],base_activation=act_fn)
 
         self.attn_drop = nn.Dropout(attn_drop)
-        self.proj = Mutable_KAN([cast(int, head_dim) * num_heads, cast(int, embed_dim)])
+        self.proj = Mutable_KAN([cast(int, head_dim) * num_heads, cast(int, embed_dim)],base_activation=act_fn)
         self.proj_drop = nn.Dropout(proj_drop)
         self.rpe = rpe
 
@@ -251,6 +252,7 @@ class TransformerEncoderLayer(nn.Module):
         drop_path: float = 0.,
         drop_rate: float = 0.,
         pre_norm: bool = True,
+        act_fn = torch.nn.ReLU,
         **kwargs
     ):
         super().__init__()
@@ -258,7 +260,7 @@ class TransformerEncoderLayer(nn.Module):
         self.normalize_before = pre_norm
 
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
-        self.attn = RelativePositionSelfAttention(embed_dim=embed_dim, num_heads=num_heads, **kwargs)
+        self.attn = RelativePositionSelfAttention(embed_dim=embed_dim, num_heads=num_heads,act_fn=act_fn **kwargs)
 
         self.attn_layer_norm = MutableLayerNorm(cast(int, embed_dim))
         self.ffn_layer_norm = MutableLayerNorm(cast(int, embed_dim))
@@ -269,11 +271,12 @@ class TransformerEncoderLayer(nn.Module):
 
         self.fc1 = Mutable_KAN(
             [cast(int, embed_dim),
-            cast(int, MutableExpression.to_int(embed_dim * mlp_ratio))]
+            cast(int, MutableExpression.to_int(embed_dim * mlp_ratio))],base_activation=act_fn
+
         )
         self.fc2 = Mutable_KAN(
             [cast(int, MutableExpression.to_int(embed_dim * mlp_ratio)),
-            cast(int, embed_dim)]
+            cast(int, embed_dim)],base_activation=act_fn
         )
 
     def maybe_layer_norm(self, layer_norm, x, before=False, after=False):

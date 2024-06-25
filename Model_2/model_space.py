@@ -8,7 +8,7 @@ import nni
 from nni.mutable import MutableExpression, Sample
 from nni.nas.oneshot.pytorch.supermodule.sampling import PathSamplingRepeat
 from nni.nas.oneshot.pytorch.supermodule.differentiable import DifferentiableMixedRepeat
-from nni.nas.nn.pytorch import ModelSpace, Repeat, Cell, MutableConv2d, MutableBatchNorm2d, model_context
+from nni.nas.nn.pytorch import ModelSpace, Repeat, Cell, MutableConv2d, MutableBatchNorm2d, model_context,LayerChoice
 from nni.nas.hub.pytorch.utils.nn import DropPath
 
 from KANLinear import KanWarapper
@@ -25,8 +25,12 @@ OPS = {
         nn.MaxPool2d(3, stride=stride, padding=1),
     'skip_connect': lambda C, stride, affine:
         nn.Identity() if stride == 1 else FactorizedReduce(C, C, affine=affine),
+    'kan_hswish': lambda C, stride, affine:
+        KanWarapper(C,C,base_activation=nn.Hardswish),
+    'kan_relu6': lambda C, stride, affine:
+        KanWarapper(C,C,base_activation=nn.ReLU6),
     'kan_silu': lambda C, stride, affine:
-        KanWarapper(C,C,base_activation=nn.SiLU), 
+        KanWarapper(C,C,base_activation=nn.SiLU),
     'extra_dw': lambda C, stride, affine:
         UniversialInvertedResidual(
             C,C,3,3, stride,
@@ -457,21 +461,21 @@ class NDS(ModelSpace):
             self.C_prev = new_C_prev
             self.cls_token = ClassToken(self.C_prev)
             self.pos_embed = AbsolutePositionEmbedding(self.patches_num + 1, self.C_prev)
-            self.transformer1 = TransformerEncoderLayer(
-                embed_dim=self.C_prev,
-                num_heads=4,
-                mlp_ratio=3,
-            )
-            self.transformer2 = TransformerEncoderLayer(
-                embed_dim=self.C_prev,
-                num_heads=5,
-                mlp_ratio=3.5,
-            )
-            self.transformer3 = TransformerEncoderLayer(
-                embed_dim=self.C_prev,
-                num_heads=6,
-                mlp_ratio=4,
-            )
+            self.transformer1 = LayerChoice({
+                "transformer_11": TransformerEncoderLayer(embed_dim=self.C_prev,num_heads=4,mlp_ratio=3,act_fn=torch.nn.Hardswish),
+                "transformer_12": TransformerEncoderLayer(embed_dim=self.C_prev,num_heads=4,mlp_ratio=3,act_fn=torch.nn.ReLU),
+                "transformer_13": TransformerEncoderLayer(embed_dim=self.C_prev,num_heads=4,mlp_ratio=3,act_fn=torch.nn.GELU),
+            }, label='transformer1')
+            self.transformer2 = LayerChoice({
+                "transformer_21": TransformerEncoderLayer(embed_dim=self.C_prev,num_heads=5,mlp_ratio=3.5,act_fn=torch.nn.Hardswish),
+                "transformer_22": TransformerEncoderLayer(embed_dim=self.C_prev,num_heads=5,mlp_ratio=3.5,act_fn=torch.nn.ReLU),
+                "transformer_23": TransformerEncoderLayer(embed_dim=self.C_prev,num_heads=5,mlp_ratio=3.5,act_fn=torch.nn.GELU),
+            }, label='transformer2')
+            self.transformer3 = LayerChoice({
+                "transformer_31": TransformerEncoderLayer(embed_dim=self.C_prev,num_heads=6,mlp_ratio=4,act_fn=torch.nn.Hardswish),
+                "transformer_32": TransformerEncoderLayer(embed_dim=self.C_prev,num_heads=6,mlp_ratio=4,act_fn=torch.nn.ReLU),
+                "transformer_33": TransformerEncoderLayer(embed_dim=self.C_prev,num_heads=6,mlp_ratio=4,act_fn=torch.nn.GELU),
+            }, label='transformer1')
             self.norm = MutableLayerNorm(self.C_prev)
             self.classifier = KanWarapper(self.C_prev, self.num_labels, base_activation=nn.Softmax)
 
@@ -564,6 +568,8 @@ class MKNAS(NDS):
         'skip_connect',
         'none',
         'kan_silu',
+        'kan_hswish',
+        'kan_relu6',
         'extra_dw',
         'invert_bottleneck',
         'conv_next',
