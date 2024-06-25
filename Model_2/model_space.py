@@ -461,7 +461,7 @@ class NDS(ModelSpace):
             self.pos_embed = AbsolutePositionEmbedding(self.patches_num + 1, self.C_prev)
             self.transformer = TransformerEncoderLayer(embed_dim=self.C_prev,num_heads=4,mlp_ratio=3,act_fn=torch.nn.Hardswish)
             self.norm = MutableLayerNorm(self.C_prev)
-            self.classifier = MutableLinear(self.C_prev, self.num_labels),
+            self.classifier = MutableLinear(self.C_prev, self.num_labels)
 
     def forward(self, inputs):
         num_images, num_slices_per_image, _, height, width = inputs.size()
