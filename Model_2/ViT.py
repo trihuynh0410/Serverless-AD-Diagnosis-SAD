@@ -143,6 +143,12 @@ class RelativePositionSelfAttention(MutableModule):
         return new_module
 
     def forward(self, x):
+        device = x.device
+        
+        self.q = self.q.to(device)
+        self.k = self.k.to(device)
+        self.v = self.v.to(device)
+        self.proj = self.proj.to(device)
         B, N, _ = x.shape
 
         # Infer one of head_dim and num_heads because one of them can be mutable.
