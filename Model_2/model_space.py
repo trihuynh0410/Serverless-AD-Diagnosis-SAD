@@ -464,18 +464,11 @@ class NDS(ModelSpace):
             self.transformer1 = LayerChoice({
                 "transformer_11": TransformerEncoderLayer(embed_dim=self.C_prev,num_heads=4,mlp_ratio=3,act_fn=torch.nn.Hardswish),
                 "transformer_12": TransformerEncoderLayer(embed_dim=self.C_prev,num_heads=4,mlp_ratio=3,act_fn=torch.nn.ReLU),
-                "transformer_13": TransformerEncoderLayer(embed_dim=self.C_prev,num_heads=4,mlp_ratio=3,act_fn=torch.nn.GELU),
             }, label='transformer1')
             self.transformer2 = LayerChoice({
                 "transformer_21": TransformerEncoderLayer(embed_dim=self.C_prev,num_heads=5,mlp_ratio=3.5,act_fn=torch.nn.Hardswish),
                 "transformer_22": TransformerEncoderLayer(embed_dim=self.C_prev,num_heads=5,mlp_ratio=3.5,act_fn=torch.nn.ReLU),
-                "transformer_23": TransformerEncoderLayer(embed_dim=self.C_prev,num_heads=5,mlp_ratio=3.5,act_fn=torch.nn.GELU),
             }, label='transformer2')
-            self.transformer3 = LayerChoice({
-                "transformer_31": TransformerEncoderLayer(embed_dim=self.C_prev,num_heads=6,mlp_ratio=4,act_fn=torch.nn.Hardswish),
-                "transformer_32": TransformerEncoderLayer(embed_dim=self.C_prev,num_heads=6,mlp_ratio=4,act_fn=torch.nn.ReLU),
-                "transformer_33": TransformerEncoderLayer(embed_dim=self.C_prev,num_heads=6,mlp_ratio=4,act_fn=torch.nn.GELU),
-            }, label='transformer3')
             self.norm = MutableLayerNorm(self.C_prev)
             self.classifier = KanWarapper(self.C_prev, self.num_labels, base_activation=nn.Softmax)
 
@@ -498,7 +491,6 @@ class NDS(ModelSpace):
         x = self.pos_embed(x)
         x = self.transformer1(x)
         x = self.transformer2(x)
-        x = self.transformer3(x)
         self.norm.to(x.device)
         x = self.norm(x)
         x = torch.mean(x[:, 1:], dim=1)
