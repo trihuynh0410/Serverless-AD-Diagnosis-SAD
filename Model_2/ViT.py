@@ -303,6 +303,10 @@ class TransformerEncoderLayer(nn.Module):
         -------
         Encoded output of shape ``(batch, patch_num, sample_embed_dim)``.
         """
+        device = x.device
+        
+        self.fc1 = self.fc1.to(device)
+        self.fc2 = self.fc2.to(device)
         residual = x
         x = self.maybe_layer_norm(self.attn_layer_norm, x, before=True)
         x = self.attn(x)

@@ -484,7 +484,7 @@ class NDS(ModelSpace):
         self.norm.to(x.device)
         x = self.norm(x)
         x = torch.mean(x[:, 1:], dim=1)
-        
+        self.classifier = self.classifier.to(x.device)
         logits = self.classifier(x)
 
         return logits
