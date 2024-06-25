@@ -461,14 +461,7 @@ class NDS(ModelSpace):
             self.C_prev = new_C_prev
             self.cls_token = ClassToken(self.C_prev)
             self.pos_embed = AbsolutePositionEmbedding(self.patches_num + 1, self.C_prev)
-            self.transformer1 = LayerChoice({
-                "transformer_11": TransformerEncoderLayer(embed_dim=self.C_prev,num_heads=4,mlp_ratio=3,act_fn=torch.nn.Hardswish),
-                "transformer_12": TransformerEncoderLayer(embed_dim=self.C_prev,num_heads=4,mlp_ratio=3,act_fn=torch.nn.ReLU),
-            }, label='transformer1')
-            self.transformer2 = LayerChoice({
-                "transformer_21": TransformerEncoderLayer(embed_dim=self.C_prev,num_heads=5,mlp_ratio=3.5,act_fn=torch.nn.Hardswish),
-                "transformer_22": TransformerEncoderLayer(embed_dim=self.C_prev,num_heads=5,mlp_ratio=3.5,act_fn=torch.nn.ReLU),
-            }, label='transformer2')
+            self.transformer = TransformerEncoderLayer(embed_dim=self.C_prev,num_heads=4,mlp_ratio=3,act_fn=torch.nn.Hardswish),
             self.norm = MutableLayerNorm(self.C_prev)
             self.classifier = KanWarapper(self.C_prev, self.num_labels, base_activation=nn.Softmax)
 
@@ -489,8 +482,7 @@ class NDS(ModelSpace):
         
         x = self.cls_token(out)
         x = self.pos_embed(x)
-        x = self.transformer1(x)
-        x = self.transformer2(x)
+        x = self.transformer(x)
         self.norm.to(x.device)
         x = self.norm(x)
         x = torch.mean(x[:, 1:], dim=1)
