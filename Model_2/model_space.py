@@ -459,7 +459,7 @@ class NDS(ModelSpace):
             self.C_prev = new_C_prev
             self.cls_token = ClassToken(self.C_prev)
             self.pos_embed = AbsolutePositionEmbedding(self.patches_num + 1, self.C_prev)
-            self.transformer = TransformerEncoderLayer(embed_dim=self.C_prev,num_heads=4,mlp_ratio=3,act_fn=torch.nn.Hardswish),
+            self.transformer = TransformerEncoderLayer(embed_dim=self.C_prev,num_heads=4,mlp_ratio=3,act_fn=torch.nn.Hardswish)
             self.norm = MutableLayerNorm(self.C_prev)
             self.classifier = KanWarapper(self.C_prev, self.num_labels, base_activation=nn.Softmax)
 
