@@ -133,7 +133,15 @@ class KANLinear(torch.nn.Module):
         solution = torch.linalg.lstsq(
             A, B
         ).solution
+        #lambda_reg=1e-3
+        # AtA = torch.matmul(A.transpose(-1, -2), A)  # (in_features, grid_size + spline_order, grid_size + spline_order)
+        # I = torch.eye(AtA.size(-1), device=AtA.device, dtype=AtA.dtype)
+        # AtA_reg = AtA + lambda_reg * I  # Regularized matrix
 
+        # AtB = torch.matmul(A.transpose(-1, -2), B)  # (in_features, grid_size + spline_order, out_features)
+
+        # # Solve the regularized least squares problem
+        # solution, _ = torch.solve(AtB, AtA_reg)
         result = solution.permute(
             2, 0, 1
         )  # (out_features, in_features, grid_size + spline_order)

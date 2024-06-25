@@ -8,7 +8,7 @@ import nni
 from nni.mutable import MutableExpression, Sample
 from nni.nas.oneshot.pytorch.supermodule.sampling import PathSamplingRepeat
 from nni.nas.oneshot.pytorch.supermodule.differentiable import DifferentiableMixedRepeat
-from nni.nas.nn.pytorch import ModelSpace, Repeat, Cell, MutableConv2d, MutableBatchNorm2d, model_context,LayerChoice
+from nni.nas.nn.pytorch import ModelSpace, Repeat, Cell, MutableConv2d, MutableBatchNorm2d, model_context,LayerChoice, MutableLinear
 from nni.nas.hub.pytorch.utils.nn import DropPath
 
 from KANLinear import KanWarapper
@@ -27,8 +27,8 @@ OPS = {
         nn.Identity() if stride == 1 else FactorizedReduce(C, C, affine=affine),
     'kan_hswish': lambda C, stride, affine:
         KanWarapper(C,C,base_activation=nn.Hardswish),
-    'kan_relu6': lambda C, stride, affine:
-        KanWarapper(C,C,base_activation=nn.ReLU6),
+    'kan_silu': lambda C, stride, affine:
+        KanWarapper(C,C,base_activation=nn.SiLU),
     'extra_dw': lambda C, stride, affine:
         UniversialInvertedResidual(
             C,C,3,3, stride,
@@ -461,7 +461,7 @@ class NDS(ModelSpace):
             self.pos_embed = AbsolutePositionEmbedding(self.patches_num + 1, self.C_prev)
             self.transformer = TransformerEncoderLayer(embed_dim=self.C_prev,num_heads=4,mlp_ratio=3,act_fn=torch.nn.Hardswish)
             self.norm = MutableLayerNorm(self.C_prev)
-            self.classifier = KanWarapper(self.C_prev, self.num_labels, base_activation=nn.Softmax)
+            self.classifier = MutableLinear(self.C_prev, self.num_labels),
 
     def forward(self, inputs):
         num_images, num_slices_per_image, _, height, width = inputs.size()
@@ -550,7 +550,7 @@ class MKNAS(NDS):
         'skip_connect',
         'none',
         'kan_hswish',
-        'kan_relu6',
+        'kan_silu',
         'extra_dw',
         'invert_bottleneck',
         'conv_next',
