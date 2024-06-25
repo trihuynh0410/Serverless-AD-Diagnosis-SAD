@@ -92,7 +92,7 @@ class KANLinear(torch.nn.Module):
             self.grid.to(x.device)
         )  # (in_features, grid_size + 2 * spline_order + 1)
         x = x.unsqueeze(-1)
-        bases = ((x >= grid[:, :-1]) & (x < grid[:, 1:])).to(x.dtype)
+        bases = ((x >= grid[:, :-1]) & (x < grid[:, 1:]))
         for k in range(1, self.spline_order + 1):
             bases = (
                 (x - grid[:, : -(k + 1)])
