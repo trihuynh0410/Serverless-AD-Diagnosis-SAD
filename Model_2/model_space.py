@@ -475,7 +475,7 @@ class NDS(ModelSpace):
                 "transformer_31": TransformerEncoderLayer(embed_dim=self.C_prev,num_heads=6,mlp_ratio=4,act_fn=torch.nn.Hardswish),
                 "transformer_32": TransformerEncoderLayer(embed_dim=self.C_prev,num_heads=6,mlp_ratio=4,act_fn=torch.nn.ReLU),
                 "transformer_33": TransformerEncoderLayer(embed_dim=self.C_prev,num_heads=6,mlp_ratio=4,act_fn=torch.nn.GELU),
-            }, label='transformer1')
+            }, label='transformer3')
             self.norm = MutableLayerNorm(self.C_prev)
             self.classifier = KanWarapper(self.C_prev, self.num_labels, base_activation=nn.Softmax)
 
