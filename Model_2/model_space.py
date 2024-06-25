@@ -29,8 +29,6 @@ OPS = {
         KanWarapper(C,C,base_activation=nn.Hardswish),
     'kan_relu6': lambda C, stride, affine:
         KanWarapper(C,C,base_activation=nn.ReLU6),
-    'kan_silu': lambda C, stride, affine:
-        KanWarapper(C,C,base_activation=nn.SiLU),
     'extra_dw': lambda C, stride, affine:
         UniversialInvertedResidual(
             C,C,3,3, stride,
@@ -551,7 +549,6 @@ class MKNAS(NDS):
         'max_pool_3x3',
         'skip_connect',
         'none',
-        'kan_silu',
         'kan_hswish',
         'kan_relu6',
         'extra_dw',
