@@ -131,10 +131,16 @@ class KANLinear(torch.nn.Module):
         B = y.transpose(0, 1)  # (in_features, batch_size, out_features)
         if A.dtype != B.dtype:
             B = B.to(A.dtype)
+        solution = torch.zeros((A.shape[0], A.shape[2], B.shape[2]), dtype=A.dtype, device=A.device)
 
-        solution = torch.linalg.lstsq(
-            A, B
-        ).solution  # (in_features, grid_size + spline_order, out_features)
+        for i in range(A.shape[0]): 
+            # QR decomposition of A[i] (batch_size, grid_size + spline_order)
+            Q, R = torch.linalg.qr(A[i])
+            # Compute Q^T B[i] (grid_size + spline_order, out_features)
+            QtB = torch.matmul(Q.transpose(-2, -1), B[i]).to(A.dtype)
+            R = R.to(A.dtype)
+            # Solve R solution[i] = QtB for solution[i]
+            solution[i] = torch.linalg.lstsq(R, QtB).solution
 
         result = solution.permute(
             2, 0, 1
@@ -159,11 +165,10 @@ class KANLinear(torch.nn.Module):
         assert x.size(-1) == self.in_features
         original_shape = x.shape
         x = x.reshape(-1, self.in_features)
-
-        base_output = F.linear(self.base_activation(x), self.base_weight)
+        base_output = F.linear(self.base_activation(x), self.base_weight.to(x.device))
         spline_output = F.linear(
             self.b_splines(x).reshape(x.size(0), -1),
-            self.scaled_spline_weight.reshape(self.out_features, -1),
+            self.scaled_spline_weight.reshape(self.out_features, -1).to(x.device),
         )
         output = base_output + spline_output
         
@@ -179,7 +184,7 @@ class KANLinear(torch.nn.Module):
 
         splines = self.b_splines(x)  # (batch, in, coeff)
         splines = splines.permute(1, 0, 2)  # (in, batch, coeff)
-        orig_coeff = self.scaled_spline_weight  # (out, in, coeff)
+        orig_coeff = self.scaled_spline_weight.to(x.device)  # (out, in, coeff)
         orig_coeff = orig_coeff.permute(1, 2, 0)  # (in, coeff, out)
         unreduced_spline_output = torch.bmm(splines, orig_coeff)  # (in, batch, out)
         unreduced_spline_output = unreduced_spline_output.permute(

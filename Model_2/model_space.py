@@ -495,6 +495,7 @@ class NDS(ModelSpace):
         x = self.transformer1(x)
         x = self.transformer2(x)
         x = self.transformer3(x)
+        self.norm.to(x.device)
         x = self.norm(x)
         x = torch.mean(x[:, 1:], dim=1)
         
