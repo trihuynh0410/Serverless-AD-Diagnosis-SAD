@@ -114,9 +114,9 @@ class RelativePositionSelfAttention(MutableModule):
             raise ValueError('head_dim and num_heads can not be both mutable.')
 
         # Please refer to MixedMultiheadAttention for details.
-        self.q = Mutable_KAN([cast(int, embed_dim), cast(int, head_dim) * num_heads], bias=qkv_bias)
-        self.k = Mutable_KAN([cast(int, embed_dim), cast(int, head_dim) * num_heads], bias=qkv_bias)
-        self.v = Mutable_KAN([cast(int, embed_dim), cast(int, head_dim) * num_heads], bias=qkv_bias)
+        self.q = Mutable_KAN([cast(int, embed_dim), cast(int, head_dim) * num_heads])
+        self.k = Mutable_KAN([cast(int, embed_dim), cast(int, head_dim) * num_heads])
+        self.v = Mutable_KAN([cast(int, embed_dim), cast(int, head_dim) * num_heads])
 
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj = Mutable_KAN([cast(int, head_dim) * num_heads, cast(int, embed_dim)])

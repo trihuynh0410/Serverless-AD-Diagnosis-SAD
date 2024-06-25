@@ -11,8 +11,7 @@ from nni.nas.oneshot.pytorch.supermodule.differentiable import DifferentiableMix
 from nni.nas.nn.pytorch import ModelSpace, Repeat, Cell, MutableConv2d, MutableBatchNorm2d, model_context
 from nni.nas.hub.pytorch.utils.nn import DropPath
 
-from KANConv import Mutable_KAN_Conv
-from KANLinear import Mutable_KAN
+from KANLinear import KanWarapper
 from MobileNetV4 import _se_or_skip, ConvBNReLU, UniversialInvertedResidual
 from ViT import *
 MaybeIntChoice = Union[int, MutableExpression]
@@ -26,6 +25,8 @@ OPS = {
         nn.MaxPool2d(3, stride=stride, padding=1),
     'skip_connect': lambda C, stride, affine:
         nn.Identity() if stride == 1 else FactorizedReduce(C, C, affine=affine),
+    'kan_silu': lambda C, stride, affine:
+        KanWarapper(C,C,base_activation=nn.SiLU), 
     'extra_dw': lambda C, stride, affine:
         UniversialInvertedResidual(
             C,C,3,3, stride,
@@ -56,8 +57,6 @@ OPS = {
                 ), 
 }
 
-
-
 class Zero(nn.Module):
 
     def __init__(self, stride):
@@ -78,8 +77,8 @@ class FactorizedReduce(nn.Module):
         else:   # is a value choice
             assert all(c % 2 == 0 for c in C_out.grid())
         self.relu = nn.ReLU(inplace=False)
-        self.conv_1 = Mutable_KAN_Conv(C_out // 2, (1,1), (2,2))
-        self.conv_2 = Mutable_KAN_Conv(C_out // 2, (1,1), (2,2))
+        self.conv_1 = MutableConv2d(C_in, C_out // 2, 1, stride=2, padding=0, bias=False)
+        self.conv_2 = MutableConv2d(C_in, C_out // 2, 1, stride=2, padding=0, bias=False)
         self.bn = MutableBatchNorm2d(C_out, affine=affine)
 
         self.pad = nn.ConstantPad2d((0, 1, 0, 1), 0)
@@ -87,9 +86,7 @@ class FactorizedReduce(nn.Module):
     def forward(self, x):
         x = self.relu(x)
         y = self.pad(x)        
-        conv1_out = self.conv_1(x)
-        conv2_out = self.conv_2(y[:, :, 1:, 1:])    
-        out = torch.cat([conv1_out, conv2_out], dim=1)
+        out = torch.cat([self.conv_1(x), self.conv_2(y[:, :, 1:, 1:])], dim=1)
         out = self.bn(out)      
         return out
     
@@ -108,8 +105,8 @@ class CellPreprocessor(nn.Module):
         if last_cell_reduce:
             self.pre0 = FactorizedReduce(cast(int, C_pprev), cast(int, C))
         else:
-            self.pre0 = ConvBNReLU(cast(int, C_pprev), cast(int, C), 1, 1, 0)
-        self.pre1 = ConvBNReLU(cast(int, C_prev), cast(int, C), 1, 1, 0)
+            self.pre0 = ConvBNReLU(cast(int, C_pprev), cast(int, C), 1, 1)
+        self.pre1 = ConvBNReLU(cast(int, C_prev), cast(int, C), 1, 1)
 
     def forward(self, cells):
         assert len(cells) == 2
@@ -186,7 +183,7 @@ class CellBuilder:
 
         ops_factory: Dict[str, Callable[[int, int, Optional[int]], nn.Module]] = {}
         for op in self.op_candidates:
-            if is_reduction_cell and op == 'ffn':
+            if is_reduction_cell and (op == 'kan_hswish' or op =='kan_relu6' or op == 'kan_silu' or op == 'ffn'):
                 continue
             ops_factory[op] = partial(self.op_factory, op=op, channels=cast(int, self.C), is_reduction_cell=is_reduction_cell)
 
@@ -396,10 +393,10 @@ class NDS(ModelSpace):
         # auxiliary head is different for network targetted at different datasets
         if dataset == 'imagenet':
             self.stem0 = nn.Sequential(
-                # MutableConv2d(1, cast(int, C // 2), kernel_size=3, stride=2, padding=1, bias=False),
-                # MutableBatchNorm2d(cast(int, C // 2)),
+                MutableConv2d(1, cast(int, C // 2), kernel_size=3, stride=2, padding=1, bias=False),
+                MutableBatchNorm2d(cast(int, C // 2)),
                 nn.ReLU(inplace=True),
-                MutableConv2d(1, cast(int, C), 3, stride=2, padding=1, bias=False),
+                MutableConv2d(cast(int, C // 2), cast(int, C), 3, stride=2, padding=1, bias=False),
                 MutableBatchNorm2d(C),
             )
             self.stem1 = nn.Sequential(
@@ -460,13 +457,23 @@ class NDS(ModelSpace):
             self.C_prev = new_C_prev
             self.cls_token = ClassToken(self.C_prev)
             self.pos_embed = AbsolutePositionEmbedding(self.patches_num + 1, self.C_prev)
-            self.transformer = TransformerEncoderLayer(
+            self.transformer1 = TransformerEncoderLayer(
                 embed_dim=self.C_prev,
                 num_heads=4,
-                mlp_ratio=2,
+                mlp_ratio=3,
+            )
+            self.transformer2 = TransformerEncoderLayer(
+                embed_dim=self.C_prev,
+                num_heads=5,
+                mlp_ratio=3.5,
+            )
+            self.transformer3 = TransformerEncoderLayer(
+                embed_dim=self.C_prev,
+                num_heads=6,
+                mlp_ratio=4,
             )
             self.norm = MutableLayerNorm(self.C_prev)
-            self.classifier = Mutable_KAN([self.C_prev, self.num_labels], base_activation=nn.Softmax)
+            self.classifier = KanWarapper(self.C_prev, self.num_labels, base_activation=nn.Softmax)
 
     def forward(self, inputs):
         num_images, num_slices_per_image, _, height, width = inputs.size()
@@ -477,14 +484,17 @@ class NDS(ModelSpace):
         for stage_idx, stage in enumerate(self.stages):
             s0, s1 = stage([s0, s1])
         out = self.global_pooling(s1)
-
-        new_patches_num = num_slices_per_image * height * width
+        new_patches_num = num_slices_per_image * out.size(2) * out.size(3)
         new_C_prev = out.size(1)
         self.update_dynamic_layers(new_patches_num, new_C_prev)
-        out = out.permute(0, 2, 3, 1).view(num_images, new_patches_num, -1)
+        out = out.permute(0, 2, 3, 1)
+        out = out.view(num_images, new_patches_num, -1)
+        
         x = self.cls_token(out)
         x = self.pos_embed(x)
-        x = self.transformer(x)
+        x = self.transformer1(x)
+        x = self.transformer2(x)
+        x = self.transformer3(x)
         x = self.norm(x)
         x = torch.mean(x[:, 1:], dim=1)
         
@@ -552,6 +562,7 @@ class MKNAS(NDS):
         'max_pool_3x3',
         'skip_connect',
         'none',
+        'kan_silu',
         'extra_dw',
         'invert_bottleneck',
         'conv_next',

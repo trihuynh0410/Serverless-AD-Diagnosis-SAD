@@ -6,3 +6,4 @@ __pycache__/
 *.nii
 *.onnx
 *.nii.gz
+lightning_logs/

@@ -4,8 +4,7 @@ import torch
 from torch import nn
 
 from nni.mutable import MutableExpression
-from nni.nas.nn.pytorch import LayerChoice, MutableBatchNorm2d
-from KANConv import Mutable_KAN_Conv
+from nni.nas.nn.pytorch import LayerChoice, MutableBatchNorm2d, MutableConv2d
 MaybeIntChoice = Union[int, MutableExpression]
 
 def make_divisible(v: Union[MutableExpression[int], MutableExpression[float], int, float], divisor, min_val=None) -> MaybeIntChoice:
@@ -51,7 +50,6 @@ class SqueezeExcite(nn.Module):
 
     def __init__(self,
                  channels: int,
-                 device: str = 'cuda',
                  reduction_ratio: float = 0.25,
                  gate_layer: Optional[Callable[..., nn.Module]] = None,
                  activation_layer: Optional[Callable[..., nn.Module]] = None):
@@ -60,9 +58,9 @@ class SqueezeExcite(nn.Module):
         rd_channels = make_divisible(channels * reduction_ratio, 8)
         gate_layer = gate_layer or nn.Hardsigmoid
         activation_layer = activation_layer or nn.ReLU
-        self.conv_reduce = Mutable_KAN_Conv(rd_channels,(3,3),padding=(1,1),base_activation=activation_layer, device=device)
+        self.conv_reduce = MutableConv2d(channels, rd_channels, 1, bias=True)
         self.act1 = activation_layer(inplace=True)
-        self.conv_expand = Mutable_KAN_Conv(channels, (3,3),padding=(1,1),base_activation=activation_layer, device=device)
+        self.conv_expand = MutableConv2d(rd_channels, channels, 1, bias=True)
         self.gate = gate_layer()
 
     def forward(self, x):
@@ -98,7 +96,6 @@ class ConvBNReLU(nn.Sequential):
         norm_layer: Optional[Callable[[int], nn.Module]] = None,
         activation_layer: Optional[Callable[..., nn.Module]] = None,
         dilation: int = 1,
-        device: str = 'cuda'
     ) -> None:
         padding = (kernel_size - 1) // 2 * dilation
         if norm_layer is None:
@@ -108,15 +105,17 @@ class ConvBNReLU(nn.Sequential):
         # If no normalization is used, set bias to True
         # https://github.com/google-research/google-research/blob/20736344/tunas/rematlib/mobile_model_v3.py#L194
         norm = norm_layer(cast(int, out_channels))
-
+        no_normalization = isinstance(norm, nn.Identity)
         blocks: List[nn.Module] = [
-            Mutable_KAN_Conv(
+            MutableConv2d(
+                cast(int, in_channels),
                 cast(int, out_channels),
-                (kernel_size, kernel_size),
-                (stride,stride),
-                (padding, padding),
-                (dilation,dilation),
-                device=device
+                cast(int, kernel_size),
+                stride,
+                cast(int, padding),
+                dilation=dilation,
+                groups=cast(int, groups),
+                bias=no_normalization
             ),
             # Normalization, regardless of batchnorm or identity
             norm,
@@ -181,8 +180,6 @@ class UniversialInvertedResidual(nn.Sequential):
         self.stride = stride
         self.out_channels = out_channels
         assert stride in [1, 2]
-        self.first_conv = first_conv
-        self.second_conv = second_conv        
         hidden_ch = cast(int, make_divisible(in_channels * expand_ratio, 8))
 
         # NOTE: this equivalence check (==) does NOT work for ValueChoice, need to use "is"
