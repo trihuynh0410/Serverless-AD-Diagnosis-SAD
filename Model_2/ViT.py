@@ -260,7 +260,7 @@ class TransformerEncoderLayer(nn.Module):
         self.normalize_before = pre_norm
 
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
-        self.attn = RelativePositionSelfAttention(embed_dim=embed_dim, num_heads=num_heads,act_fn=act_fn **kwargs)
+        self.attn = RelativePositionSelfAttention(embed_dim=embed_dim, num_heads=num_heads,act_fn=act_fn, **kwargs)
 
         self.attn_layer_norm = MutableLayerNorm(cast(int, embed_dim))
         self.ffn_layer_norm = MutableLayerNorm(cast(int, embed_dim))
