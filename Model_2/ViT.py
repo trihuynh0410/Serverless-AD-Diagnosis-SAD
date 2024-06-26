@@ -8,13 +8,12 @@ import torch.nn.functional as F
 
 from nni.mutable import Categorical, MutableExpression, ensure_frozen, Mutable
 from nni.nas.nn.pytorch import (
-    ParametrizedModule,MutableModule, MutableLayerNorm
+    ParametrizedModule,MutableModule, MutableLayerNorm, MutableLinear
 )
 from nni.nas.space import current_model
 from nni.nas.profiler.pytorch.flops import FlopsResult
 from nni.nas.profiler.pytorch.utils import MutableShape, ShapeTensor, profiler_leaf_module
 from nni.nas.hub.pytorch.utils.nn import DropPath
-from KANLinear import Mutable_KAN
 
 class RelativePosition2D(nn.Module):
     """The implementation of relative position encoding for 2D image feature maps.
@@ -93,7 +92,6 @@ class RelativePositionSelfAttention(MutableModule):
         qk_scale: float | None = None,
         rpe: bool = False,
         rpe_length: int = 14,
-        act_fn = torch.nn.ReLU
     ):
         super().__init__()
 
@@ -115,12 +113,12 @@ class RelativePositionSelfAttention(MutableModule):
             raise ValueError('head_dim and num_heads can not be both mutable.')
 
         # Please refer to MixedMultiheadAttention for details.
-        self.q = Mutable_KAN([cast(int, embed_dim), cast(int, head_dim) * num_heads],base_activation=act_fn)
-        self.k = Mutable_KAN([cast(int, embed_dim), cast(int, head_dim) * num_heads],base_activation=act_fn)
-        self.v = Mutable_KAN([cast(int, embed_dim), cast(int, head_dim) * num_heads],base_activation=act_fn)
+        self.q = MutableLinear(cast(int, embed_dim), cast(int, head_dim) * num_heads, bias=qkv_bias)
+        self.k = MutableLinear(cast(int, embed_dim), cast(int, head_dim) * num_heads, bias=qkv_bias)
+        self.v = MutableLinear(cast(int, embed_dim), cast(int, head_dim) * num_heads, bias=qkv_bias)
 
         self.attn_drop = nn.Dropout(attn_drop)
-        self.proj = Mutable_KAN([cast(int, head_dim) * num_heads, cast(int, embed_dim)],base_activation=act_fn)
+        self.proj = MutableLinear(cast(int, head_dim) * num_heads, cast(int, embed_dim))
         self.proj_drop = nn.Dropout(proj_drop)
         self.rpe = rpe
 
@@ -145,6 +143,12 @@ class RelativePositionSelfAttention(MutableModule):
         return new_module
 
     def forward(self, x):
+        device = x.device
+        
+        self.q = self.q.to(device)
+        self.k = self.k.to(device)
+        self.v = self.v.to(device)
+        self.proj = self.proj.to(device)
         B, N, _ = x.shape
 
         # Infer one of head_dim and num_heads because one of them can be mutable.
@@ -260,7 +264,7 @@ class TransformerEncoderLayer(nn.Module):
         self.normalize_before = pre_norm
 
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
-        self.attn = RelativePositionSelfAttention(embed_dim=embed_dim, num_heads=num_heads,act_fn=act_fn, **kwargs)
+        self.attn = RelativePositionSelfAttention(embed_dim=embed_dim, num_heads=num_heads, **kwargs)
 
         self.attn_layer_norm = MutableLayerNorm(cast(int, embed_dim))
         self.ffn_layer_norm = MutableLayerNorm(cast(int, embed_dim))
@@ -269,14 +273,13 @@ class TransformerEncoderLayer(nn.Module):
 
         self.dropout = nn.Dropout(drop_rate)
 
-        self.fc1 = Mutable_KAN(
-            [cast(int, embed_dim),
-            cast(int, MutableExpression.to_int(embed_dim * mlp_ratio))],base_activation=act_fn
-
+        self.fc1 = MutableLinear(
+            cast(int, embed_dim),
+            cast(int, MutableExpression.to_int(embed_dim * mlp_ratio))
         )
-        self.fc2 = Mutable_KAN(
-            [cast(int, MutableExpression.to_int(embed_dim * mlp_ratio)),
-            cast(int, embed_dim)],base_activation=act_fn
+        self.fc2 = MutableLinear(
+            cast(int, MutableExpression.to_int(embed_dim * mlp_ratio)),
+            cast(int, embed_dim)
         )
 
     def maybe_layer_norm(self, layer_norm, x, before=False, after=False):

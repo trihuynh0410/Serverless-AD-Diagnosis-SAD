@@ -13,7 +13,7 @@ from nni.nas.strategy import DARTS
 from nni.nas.experiment import NasExperiment
 from nni.nas.hub.pytorch.nasnet import NDSStageDifferentiable
 
-from Model_2.model_space_gitig_ import *
+from Model_2.model_space import *
 
 class AugmentTransform:
     def __init__(self):

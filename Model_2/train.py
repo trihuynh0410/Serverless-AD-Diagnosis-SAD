@@ -155,7 +155,7 @@ class DartsClassificationModule(ClassificationModule):
             print("lr is",self.trainer.optimizers[0].param_groups[0]['lr'])
 
 from nni.nas.evaluator.pytorch import Lightning, Trainer, Classification
-from Model_2.model_space_gitig_ import *
+from Model_2.model_space import *
 from nni.nas.strategy import DARTS
 from nni.nas.experiment import NasExperiment
 from nni.nas.hub.pytorch.nasnet import NDSStageDifferentiable
