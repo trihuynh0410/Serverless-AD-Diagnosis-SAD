@@ -131,7 +131,7 @@ class MobileViT(ModelSpace):
         assert len(base_widths) == 5
         # include the last stage info widths here
         widths = [make_divisible(width * width_mult, 8) for width in base_widths]
-        downsamples = [True, False, True, True, False, False]
+        downsamples = [True, False, True, True, False, True, False]
 
         depth = nni.choice("depth", list(search_depth))
         mlp_ratios = [nni.choice(f"mlp_ratio_{i}", list(search_mlp_ratio)) for i in range(max(search_depth))]
@@ -165,7 +165,7 @@ class MobileViT(ModelSpace):
 
         self.blocks = nn.Sequential(*blocks)
 
-        self.patches_num = 4
+        self.patches_num = 6
         embed_dim = embed_dim*14*14
         self.cls_token = ClassToken(cast(int, embed_dim))
         self.pos_embed = AbsolutePositionEmbedding(self.patches_num + 1, cast(int, embed_dim)) if absolute_position else nn.Identity()
@@ -203,17 +203,12 @@ class MobileViT(ModelSpace):
 
         x = self.stem(x.view(-1, 1, height, width))
         x = self.blocks(x)
-
         x = x.view(num_images, num_slices_per_image, x.size(1)*x.size(2)*x.size(3))
         x = self.cls_token(x)
         x = self.pos_embed(x)
         x = self.transformers(x)
         x = self.norm(x)
-
-        if self.global_pooling:
-            x = torch.mean(x[:, 1:], dim=1)
-        else:
-            x = x[:, 0]
+        x = torch.mean(x[:, 1:], dim=1)
         x = self.dropout_layer(x)
         x = self.head(x)
 
