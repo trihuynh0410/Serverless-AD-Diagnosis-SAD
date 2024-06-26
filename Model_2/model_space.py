@@ -183,7 +183,7 @@ class MobileViT(ModelSpace):
                 drop_rate=dropout_rate,
                 attn_drop=attn_drop_rate,
                 drop_path=dpr[index],
-                rpe_length=math.sqrt(self.patches_num),
+                rpe_length=int(math.sqrt(self.patches_num)),
                 qk_scale=qk_scale,
                 rpe=rpe,
                 pre_norm=pre_norm
