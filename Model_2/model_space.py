@@ -12,7 +12,7 @@ from nni.nas.nn.pytorch import (
     MutableLinear, MutableLayerNorm, MutableLinear
 )
 from nni.nas.oneshot.pytorch.supermodule.operation import MixedOperation
-
+from KANLinear import Mutable_KAN
 from MobileNetV4 import *
 from ViT import *
 MaybeIntChoice = Union[int, MutableExpression]
@@ -110,7 +110,7 @@ class MobileViT(ModelSpace):
     def __init__(
         self,
         num_labels: int = 3,
-        base_widths: Tuple[int, ...] = (32, 16, 32, 40, 80),
+        base_widths: Tuple[int, ...] = (32, 16, 32, 40),
         dropout_rate: float = 0.,
         width_mult: float = 1.0,
         bn_eps: float = 1e-3,
@@ -128,10 +128,10 @@ class MobileViT(ModelSpace):
         rpe: bool = True,
     ):
         super().__init__()
-        assert len(base_widths) == 5
+        assert len(base_widths) == 4
         # include the last stage info widths here
         widths = [make_divisible(width * width_mult, 8) for width in base_widths]
-        downsamples = [True, False, True, True, False, True, False]
+        downsamples = [True, True, True, True, False, True]
 
         depth = nni.choice("depth", list(search_depth))
         mlp_ratios = [nni.choice(f"mlp_ratio_{i}", list(search_mlp_ratio)) for i in range(max(search_depth))]
@@ -151,12 +151,12 @@ class MobileViT(ModelSpace):
         ]
 
         # https://github.com/ultmaster/AceNAS/blob/46c8895fd8a05ffbc61a6b44f1e813f64b4f66b7/searchspace/proxylessnas/__init__.py#L21
-        for stage in range(2, 6):
+        for stage in range(2, 5):
             # Rather than returning a fixed module here,
             # we return a builder that dynamically creates module for different `repeat_idx`.
             builder = inverted_residual_choice_builder(
-                [3, 6], [3, 5, 7], downsamples[stage], widths[stage - 1], widths[stage], f's{stage}')
-            if stage < 5:
+                [3, 4], [3, 5], downsamples[stage], widths[stage - 1], widths[stage], f's{stage}')
+            if stage < 4:
                 blocks.append(Repeat(builder, (1, 3), label=f's{stage}_depth'))
             else:
                 # No mutation for depth in the last stage.
@@ -192,7 +192,10 @@ class MobileViT(ModelSpace):
         self.dropout_layer = nn.Dropout(dropout_rate)
 
         self.head = MutableLinear(cast(int, embed_dim), num_labels) if num_labels > 0 else nn.Identity()
-
+        self.head = LayerChoice({
+            "mlp":MutableLinear(cast(int, embed_dim), num_labels),
+            "kan":Mutable_KAN([cast(int, embed_dim), num_labels], base_activation=nn.Softmax)
+        }, label='head')
     @classmethod
     def extra_oneshot_hooks(cls, strategy):
         # General hooks agnostic to strategy.
