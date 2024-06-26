@@ -127,6 +127,47 @@ class ConvBNReLU(nn.Sequential):
 
         super().__init__(*simplify_sequential(blocks))
 
+class DepthwiseSeparableConv(nn.Sequential):
+    """
+    In the original MobileNetV2 implementation, this is InvertedResidual when expand ratio = 1.
+    Residual connection is added if input and output shape are the same.
+
+    References:
+
+    - https://github.com/rwightman/pytorch-image-models/blob/b7cb8d03/timm/models/efficientnet_blocks.py#L90
+    - https://github.com/google-research/google-research/blob/20736344/tunas/rematlib/mobile_model_v3.py#L433
+    - https://github.com/ultmaster/AceNAS/blob/46c8895f/searchspace/proxylessnas/utils.py#L100
+    """
+
+    def __init__(
+        self,
+        in_channels: MaybeIntChoice,
+        out_channels: MaybeIntChoice,
+        kernel_size: MaybeIntChoice = 3,
+        stride: int = 1,
+        squeeze_excite: Optional[Callable[[MaybeIntChoice, MaybeIntChoice], nn.Module]] = None,
+        norm_layer: Optional[Callable[[int], nn.Module]] = None,
+        activation_layer: Optional[Callable[..., nn.Module]] = None,
+    ) -> None:
+        blocks = [
+            # dw
+            ConvBNReLU(in_channels, in_channels, stride=stride, kernel_size=kernel_size, groups=in_channels,
+                       norm_layer=norm_layer, activation_layer=activation_layer),
+            # optional se
+            squeeze_excite(in_channels, in_channels) if squeeze_excite else nn.Identity(),
+            # pw-linear
+            ConvBNReLU(in_channels, out_channels, kernel_size=1, norm_layer=norm_layer, activation_layer=nn.Identity)
+        ]
+        super().__init__(*simplify_sequential(blocks))
+        # NOTE: "is" is used here instead of "==" to avoid creating a new value choice.
+        self.has_skip = stride == 1 and in_channels is out_channels
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self.has_skip:
+            return x + super().forward(x)
+        else:
+            return super().forward(x)
+
 class UniversialInvertedResidual(nn.Sequential):
     """
     An Inverted Residual Block, sometimes called an MBConv Block, is a type of residual block used for image models

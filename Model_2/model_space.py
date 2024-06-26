@@ -25,10 +25,6 @@ OPS = {
         nn.MaxPool2d(3, stride=stride, padding=1),
     'skip_connect': lambda C, stride, affine:
         nn.Identity() if stride == 1 else FactorizedReduce(C, C, affine=affine),
-    'kan_hswish': lambda C, stride, affine:
-        KanWarapper(C,C,base_activation=nn.Hardswish),
-    'kan_silu': lambda C, stride, affine:
-        KanWarapper(C,C,base_activation=nn.SiLU),
     'extra_dw': lambda C, stride, affine:
         UniversialInvertedResidual(
             C,C,3,3, stride,
@@ -394,20 +390,13 @@ class NDS(ModelSpace):
 
         # auxiliary head is different for network targetted at different datasets
         if dataset == 'imagenet':
-            self.stem0 = nn.Sequential(
-                MutableConv2d(1, cast(int, C // 2), kernel_size=3, stride=2, padding=1, bias=False),
-                MutableBatchNorm2d(cast(int, C // 2)),
-                nn.ReLU(inplace=True),
-                MutableConv2d(cast(int, C // 2), cast(int, C), 3, stride=2, padding=1, bias=False),
-                MutableBatchNorm2d(C),
+            self.stem = nn.Sequential(
+                MutableConv2d(3, cast(int, 3 * C), 3, padding=1, bias=False),
+                MutableBatchNorm2d(cast(int, 3 * C))
             )
-            self.stem1 = nn.Sequential(
-                nn.ReLU(inplace=True),
-                MutableConv2d(cast(int, C), cast(int, C), 3, stride=2, padding=1, bias=False),
-                MutableBatchNorm2d(C),
-            )
-            C_pprev = C_prev = C_curr = C
-            last_cell_reduce = True
+            C_pprev = C_prev = 3 * C
+            C_curr = C
+            last_cell_reduce = False
 
         self.stages = nn.ModuleList()
         for stage_idx in range(3):
@@ -461,22 +450,21 @@ class NDS(ModelSpace):
             self.pos_embed = AbsolutePositionEmbedding(self.patches_num + 1, self.C_prev)
             self.transformer = TransformerEncoderLayer(embed_dim=self.C_prev,num_heads=4,mlp_ratio=3,act_fn=torch.nn.Hardswish)
             self.norm = MutableLayerNorm(self.C_prev)
-            self.classifier = MutableLinear(self.C_prev, self.num_labels)
+            # self.classifier = MutableLinear(self.C_prev, self.num_labels)
+            self.classifier = KanWarapper(self.C_prev, self.num_labels, base_activation=nn.Softmax)
 
     def forward(self, inputs):
         num_images, num_slices_per_image, _, height, width = inputs.size()
         self.num_slices_per_image = num_slices_per_image
         if self.dataset == 'imagenet':
-            s0 = self.stem0(inputs.view(-1, 1, height, width))
-            s1 = self.stem1(s0)
+            s0 = s1 = self.stem(inputs)
         for stage_idx, stage in enumerate(self.stages):
             s0, s1 = stage([s0, s1])
         out = self.global_pooling(s1)
-        new_patches_num = num_slices_per_image * out.size(2) * out.size(3)
-        new_C_prev = out.size(1)
-        self.update_dynamic_layers(new_patches_num, new_C_prev)
-        out = out.permute(0, 2, 3, 1)
-        out = out.view(num_images, new_patches_num, -1)
+        new_C_prev = out.size(1)*out.size(2)*out.size(3)
+
+        self.update_dynamic_layers(num_slices_per_image, new_C_prev)
+        out = out.view(num_images, num_slices_per_image, new_C_prev)
         
         x = self.cls_token(out)
         x = self.pos_embed(x)
@@ -549,8 +537,6 @@ class MKNAS(NDS):
         'max_pool_3x3',
         'skip_connect',
         'none',
-        'kan_hswish',
-        'kan_silu',
         'extra_dw',
         'invert_bottleneck',
         'conv_next',
