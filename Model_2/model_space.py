@@ -457,7 +457,7 @@ class NDS(ModelSpace):
         num_images, num_slices_per_image, _, height, width = inputs.size()
         self.num_slices_per_image = num_slices_per_image
         if self.dataset == 'imagenet':
-            s0 = s1 = self.stem(inputs)
+            s0 = s1 = self.stem(inputs.view(-1, 1, height, width))
         for stage_idx, stage in enumerate(self.stages):
             s0, s1 = stage([s0, s1])
         out = self.global_pooling(s1)
