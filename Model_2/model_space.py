@@ -391,7 +391,7 @@ class NDS(ModelSpace):
         # auxiliary head is different for network targetted at different datasets
         if dataset == 'imagenet':
             self.stem = nn.Sequential(
-                MutableConv2d(3, cast(int, 3 * C), 3, padding=1, bias=False),
+                MutableConv2d(1, cast(int, 3 * C), 3, padding=1, bias=False),
                 MutableBatchNorm2d(cast(int, 3 * C))
             )
             C_pprev = C_prev = 3 * C
