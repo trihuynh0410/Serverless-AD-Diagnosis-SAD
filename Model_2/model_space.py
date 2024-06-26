@@ -110,6 +110,7 @@ class MobileViT(ModelSpace):
     def __init__(
         self,
         num_labels: int = 3,
+        num_slices_per_image: int = 6,
         base_widths: Tuple[int, ...] = (32, 16, 32, 40, 80),
         dropout_rate: float = 0.,
         width_mult: float = 1.0,
@@ -165,7 +166,7 @@ class MobileViT(ModelSpace):
 
         self.blocks = nn.Sequential(*blocks)
 
-        self.patches_num = 6
+        self.patches_num = num_slices_per_image
         embed_dim = embed_dim*14*14
         self.cls_token = ClassToken(cast(int, embed_dim))
         self.pos_embed = AbsolutePositionEmbedding(self.patches_num + 1, cast(int, embed_dim)) if absolute_position else nn.Identity()
