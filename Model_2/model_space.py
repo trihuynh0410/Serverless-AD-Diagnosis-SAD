@@ -110,7 +110,7 @@ class MobileViT(ModelSpace):
     def __init__(
         self,
         num_labels: int = 3,
-        base_widths: Tuple[int, ...] = (32, 16, 32, 40),
+        base_widths: Tuple[int, ...] = (32, 16, 32, 40, 80),
         dropout_rate: float = 0.,
         width_mult: float = 1.0,
         bn_eps: float = 1e-3,
@@ -128,10 +128,10 @@ class MobileViT(ModelSpace):
         rpe: bool = True,
     ):
         super().__init__()
-        assert len(base_widths) == 4
+        assert len(base_widths) == 5
         # include the last stage info widths here
         widths = [make_divisible(width * width_mult, 8) for width in base_widths]
-        downsamples = [True, True, True, True, False, True]
+        downsamples = [True, False, True, True, True, True]
 
         depth = nni.choice("depth", list(search_depth))
         mlp_ratios = [nni.choice(f"mlp_ratio_{i}", list(search_mlp_ratio)) for i in range(max(search_depth))]
@@ -151,13 +151,12 @@ class MobileViT(ModelSpace):
         ]
 
         # https://github.com/ultmaster/AceNAS/blob/46c8895fd8a05ffbc61a6b44f1e813f64b4f66b7/searchspace/proxylessnas/__init__.py#L21
-        for stage in range(2, 5):
+        for stage in range(2, 6):
             # Rather than returning a fixed module here,
             # we return a builder that dynamically creates module for different `repeat_idx`.
-            print(downsamples[stage])
             builder = inverted_residual_choice_builder(
                 [3, 4], [3, 5], downsamples[stage], widths[stage - 1], widths[stage], f's{stage}')
-            if stage < 4:
+            if stage < 5:
                 blocks.append(Repeat(builder, (1, 3), label=f's{stage}_depth'))
             else:
                 # No mutation for depth in the last stage.
@@ -207,7 +206,6 @@ class MobileViT(ModelSpace):
 
         x = self.stem(x.view(-1, 1, height, width))
         x = self.blocks(x)
-        print(x.shape)
         x = x.view(num_images, num_slices_per_image, x.size(1)*x.size(2)*x.size(3))
         x = self.cls_token(x)
         x = self.pos_embed(x)
