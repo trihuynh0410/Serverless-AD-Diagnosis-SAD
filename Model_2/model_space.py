@@ -154,6 +154,7 @@ class MobileViT(ModelSpace):
         for stage in range(2, 5):
             # Rather than returning a fixed module here,
             # we return a builder that dynamically creates module for different `repeat_idx`.
+            print(downsamples[stage])
             builder = inverted_residual_choice_builder(
                 [3, 4], [3, 5], downsamples[stage], widths[stage - 1], widths[stage], f's{stage}')
             if stage < 4:
