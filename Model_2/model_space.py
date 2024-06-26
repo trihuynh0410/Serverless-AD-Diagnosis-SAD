@@ -151,12 +151,12 @@ class MobileViT(ModelSpace):
         ]
 
         # https://github.com/ultmaster/AceNAS/blob/46c8895fd8a05ffbc61a6b44f1e813f64b4f66b7/searchspace/proxylessnas/__init__.py#L21
-        for stage in range(2, 6):
+        for stage in range(2, 5):
             # Rather than returning a fixed module here,
             # we return a builder that dynamically creates module for different `repeat_idx`.
             builder = inverted_residual_choice_builder(
                 [3, 4], [3, 5], downsamples[stage], widths[stage - 1], widths[stage], f's{stage}')
-            if stage < 5:
+            if stage < 4:
                 blocks.append(Repeat(builder, (1, 3), label=f's{stage}_depth'))
             else:
                 # No mutation for depth in the last stage.
@@ -206,6 +206,7 @@ class MobileViT(ModelSpace):
 
         x = self.stem(x.view(-1, 1, height, width))
         x = self.blocks(x)
+        print(x.shape)
         x = x.view(num_images, num_slices_per_image, x.size(1)*x.size(2)*x.size(3))
         x = self.cls_token(x)
         x = self.pos_embed(x)
