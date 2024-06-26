@@ -15,6 +15,7 @@ from nni.nas.oneshot.pytorch.supermodule.operation import MixedOperation
 from KANLinear import Mutable_KAN
 from MobileNetV4 import *
 from ViT import *
+import math
 MaybeIntChoice = Union[int, MutableExpression]
 
 def inverted_residual_choice_builder(
@@ -182,7 +183,7 @@ class MobileViT(ModelSpace):
                 drop_rate=dropout_rate,
                 attn_drop=attn_drop_rate,
                 drop_path=dpr[index],
-                rpe_length=4,
+                rpe_length=math.sqrt(self.patches_num),
                 qk_scale=qk_scale,
                 rpe=rpe,
                 pre_norm=pre_norm
