@@ -9,11 +9,11 @@ from nni.mutable import MutableExpression, Sample
 from nni.nas.hub.pytorch.utils.nn import DropPath
 from nni.nas.nn.pytorch import (
     ModelSpace, Repeat,  LayerChoice,
-    MutableLinear, MutableLayerNorm, MutableLinear
+    MutableLinear, MutableLayerNorm, MutableLinear, MutableBatchNorm2d
 )
 from nni.nas.oneshot.pytorch.supermodule.operation import MixedOperation
 from KANLinear import Mutable_KAN
-from MobileNetV4 import *
+from MobileNetV4 import UniversialInvertedResidual, _se_or_skip, make_divisible, ConvBNReLU, DepthwiseSeparableConv
 from ViT import *
 import math
 MaybeIntChoice = Union[int, MutableExpression]
@@ -55,8 +55,10 @@ def inverted_residual_choice_builder(
                             mbtype = 'ffn'
                         if stride == 2 and mbtype == 'ffn':
                             continue
-                        op_choices[f'k_{kernel_size}e_{exp_ratio}t_{mbtype}'] = UniversialInvertedResidual(
-                            inp, oup, exp_ratio, kernel_size, stride, first_conv=first_conv, second_conv=second_conv
+                        op_choices[f'k{kernel_size}_e{exp_ratio}_{mbtype}'] = UniversialInvertedResidual(
+                            inp, oup, exp_ratio, kernel_size, stride, first_conv=first_conv, second_conv=second_conv,
+                            squeeze_excite=cast(Callable[[MaybeIntChoice, MaybeIntChoice], nn.Module], 
+                                partial(_se_or_skip, optional=False, se_from_exp=True, label=mbtype)),
                             )
 
         # It can be implemented with ValueChoice, but we use LayerChoice here
