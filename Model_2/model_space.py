@@ -57,8 +57,6 @@ def inverted_residual_choice_builder(
                             continue
                         op_choices[f'k{kernel_size}_e{exp_ratio}_{mbtype}'] = UniversialInvertedResidual(
                             inp, oup, exp_ratio, kernel_size, stride, first_conv=first_conv, second_conv=second_conv,
-                            squeeze_excite=cast(Callable[[MaybeIntChoice, MaybeIntChoice], nn.Module], 
-                                partial(_se_or_skip, optional=False, se_from_exp=True, label=mbtype)),
                             )
 
         # It can be implemented with ValueChoice, but we use LayerChoice here
