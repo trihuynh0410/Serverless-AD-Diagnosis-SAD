@@ -708,6 +708,7 @@ class NDS(ModelSpace):
                  dataset: Literal['cifar', 'imagenet'] = 'imagenet',
                  auxiliary_loss: bool = False,
                  num_slices_per_image: int = 6,
+                 num_classes: int = 3,
                  drop_path_prob: float = 0.):
         super().__init__()
 
@@ -717,7 +718,7 @@ class NDS(ModelSpace):
         self.width = width
         self.num_cells = num_cells
         self.dataset = dataset
-        self.num_labels = 3
+        self.num_labels = num_classes
         self.auxiliary_loss = auxiliary_loss
         self.drop_path_prob = drop_path_prob
         self.num_slices_per_image = num_slices_per_image
@@ -931,6 +932,7 @@ class MKNAS(NDS):
                  dataset: Literal['cifar', 'imagenet'] = 'cifar',
                  auxiliary_loss: bool = False,
                  num_slices_per_image: int = 6,
+                 num_classes: int = 3,
                  drop_path_prob: float = 0.):
         super().__init__(self.MKNAS_OPS,
                          merge_op='all',
@@ -940,4 +942,5 @@ class MKNAS(NDS):
                          dataset=dataset,
                          auxiliary_loss=auxiliary_loss,
                          num_slices_per_image = num_slices_per_image,
+                         num_classes=num_classes,
                          drop_path_prob=drop_path_prob)

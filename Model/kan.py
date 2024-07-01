@@ -272,7 +272,7 @@ class KAN(torch.nn.Module):
                 )
             )
 
-    def forward(self, x: torch.Tensor, update_grid=True):
+    def forward(self, x: torch.Tensor, update_grid=False):
         for layer in self.layers:
             if update_grid:
                 layer.update_grid(x)
