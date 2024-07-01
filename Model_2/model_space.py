@@ -306,7 +306,7 @@ class MobileViT(ModelSpace):
         self.head = MutableLinear(cast(int, embed_dim), num_labels) if num_labels > 0 else nn.Identity()
         self.head = LayerChoice({
             "mlp":MutableLinear(cast(int, embed_dim), num_labels),
-            "kan":Mutable_KAN([cast(int, embed_dim), num_labels], base_activation=nn.Softmax)
+            "kan":Mutable_KAN([cast(int, embed_dim), num_labels], base_activation=nn.ReLU)
         }, label='head')
 
     @classmethod
