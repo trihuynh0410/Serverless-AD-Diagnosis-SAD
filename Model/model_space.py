@@ -831,8 +831,8 @@ class NDS(ModelSpace):
                     s0, s1 = block([s0, s1])
                     if block_idx == 0:
                         # Approach 1: treat each slice individually, not rcm to used unless the 2 3 is underfit, cant do nas
-                        logits_aux = self.auxiliary_head(s1)
-                        # logits_aux = self.auxiliary_head(s1, num_images, num_slices_per_image)
+                        # logits_aux = self.auxiliary_head(s1)
+                        logits_aux = self.auxiliary_head(s1, num_images, num_slices_per_image)
             else:
                 s0, s1 = stage([s0, s1])
 

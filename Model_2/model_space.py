@@ -1,22 +1,114 @@
-from functools import partial
-from typing import Tuple, List, Union, Iterable, Literal, Dict, Callable, Optional, cast, Any
+from typing import Tuple, List, Union, Callable, Optional, cast, Any
 
-import torch
+import torch, math, nni
 from torch import nn
 
-import nni
-from nni.mutable import MutableExpression, Sample
-from nni.nas.hub.pytorch.utils.nn import DropPath
+from nni.mutable import MutableExpression
 from nni.nas.nn.pytorch import (
     ModelSpace, Repeat,  LayerChoice,
     MutableLinear, MutableLayerNorm, MutableLinear, MutableBatchNorm2d
 )
 from nni.nas.oneshot.pytorch.supermodule.operation import MixedOperation
+from nni.nas.hub.pytorch.proxylessnas import make_divisible, simplify_sequential, ConvBNReLU, DepthwiseSeparableConv
+
 from KANLinear import Mutable_KAN
-from MobileNetV4 import UniversialInvertedResidual, _se_or_skip, make_divisible, ConvBNReLU, DepthwiseSeparableConv
 from ViT import *
-import math
+
 MaybeIntChoice = Union[int, MutableExpression]
+
+class UniversialInvertedResidual(nn.Sequential):
+    """
+    An Universial Inverted Residual Block, originally proposed for the `MobileNetV4 <https://arxiv.org/abs/2404.10518>`.
+    It follows a structure of:
+        - Optional first depthwise
+        - First pointwise
+        - Optional second depthwise
+        - Second pointwise
+
+    This implementation is the modification of inverted residual block of NNI:
+
+    - https://github.com/microsoft/nni/blob/master/examples/nas/legacy/cream/lib/models/blocks/inverted_residual_block.py#L11
+
+    Parameters
+    ----------
+    in_channels
+        The number of input channels. Can be a value choice.
+    out_channels
+        The number of output channels. Can be a value choice.
+    expand_ratio
+        The ratio of intermediate channels with respect to input channels. Can be a value choice.
+    kernel_size
+        The kernel size of the depthwise convolution. Can be a value choice.
+    stride
+        The stride of the depthwise convolution.
+    squeeze_excite
+        Callable to create squeeze and excitation layer. Take hidden channels and input channels as arguments.
+    norm_layer
+        Callable to create normalization layer. Take input channels as argument.
+    activation_layer
+        Callable to create activation layer. No input arguments.
+    first_conv
+        Whether to use the first depthwise convolution
+    second_conv
+        Whether to use the second depthwise convolution
+    """
+
+    def __init__(
+        self,
+        in_channels: MaybeIntChoice,
+        out_channels: MaybeIntChoice,
+        expand_ratio: Union[float, MutableExpression[float]],
+        kernel_size: MaybeIntChoice = 3,
+        stride: int = 1,
+        squeeze_excite: Optional[Callable[[MaybeIntChoice, MaybeIntChoice], nn.Module]] = None,
+        norm_layer: Optional[Callable[[int], nn.Module]] = None,
+        activation_layer: Optional[Callable[..., nn.Module]] = None,
+        first_conv: bool = False,
+        second_conv: bool = False,
+    ) -> None:
+        super().__init__()
+        self.stride = stride
+        self.out_channels = out_channels
+        assert stride in [1, 2]
+        hidden_ch = cast(int, make_divisible(in_channels * expand_ratio, 8))
+
+        # NOTE: this equivalence check (==) does NOT work for ValueChoice, need to use "is"
+        self.has_skip = stride == 1 and in_channels is out_channels
+
+        first_depth = ConvBNReLU(in_channels, in_channels, stride=stride, kernel_size=kernel_size, groups=in_channels,
+                       norm_layer=norm_layer, activation_layer=activation_layer) if first_conv else nn.Identity()
+        if first_conv and second_conv:
+            stride = 1
+        Second_depth = ConvBNReLU(hidden_ch, hidden_ch, stride=stride, kernel_size=kernel_size, groups=hidden_ch,
+                       norm_layer=norm_layer, activation_layer=activation_layer) if second_conv else nn.Identity()
+                
+        layers: List[nn.Module] = [
+            # first depth-wise
+            first_depth,
+            # point-wise convolution
+            # NOTE: some paper omit this point-wise convolution when stride = 1.
+            # In our implementation, if this pw convolution is intended to be omitted,
+            # please use SepConv instead.
+            ConvBNReLU(in_channels, hidden_ch, kernel_size=1,
+                       norm_layer=norm_layer, activation_layer=activation_layer),
+            # second depth-wise
+            Second_depth,
+            # SE
+            squeeze_excite(
+                cast(int, hidden_ch),
+                cast(int, in_channels)
+            ) if squeeze_excite is not None else nn.Identity(),
+            # pw-linear
+            ConvBNReLU(hidden_ch, out_channels, kernel_size=1, norm_layer=norm_layer, activation_layer=nn.Identity),
+        ]
+
+        super().__init__(*simplify_sequential(layers))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self.has_skip:
+            return x + super().forward(x)
+        else:
+            return super().forward(x)
 
 def inverted_residual_choice_builder(
     expand_ratios: List[int],
@@ -67,27 +159,45 @@ def inverted_residual_choice_builder(
 
 class MobileViT(ModelSpace):
     """
-    The search space that is proposed in `AutoFormer <https://arxiv.org/abs/2107.00651>`__.
-    There are four searchable variables: depth, embedding dimension, heads number and MLP ratio.
+    This is the model space design to classify 3d images by performing operation on 2d slices of those images
+    The recommend number of slice is 16 slices per image, with original shape of each 2d slices is 224x224
+    
+    All 2d slice after layer belongs to ProxylessNAS for position embeded, 
+    will be treated as patches as input for AutoFormer parts
 
+
+    This search space is mixture of two search space:
+        - `ProxylessNAS <https://arxiv.org/abs/1812.00332>`__
+        - `AutoFormer <https://arxiv.org/abs/2107.00651>`__
+
+    The search space consists of:
+        - Four searchable blocks, taken from Univerisal Inverted Residual Blocks
+        - Three searchable variables: depth, heads number and MLP ratio.
+    
     Parameters
     ----------
-    search_embed_dim
-        The search space of embedding dimension. Use a list to specify search range.
+    num_labels
+        Number of class to classify
+    num_slices_per_image
+        Number of 2d slices of 3d image, also number of patches
+    base_widths
+        Widths of each stage, from stem, to body, to head. Length should be 5.
+    dropout_rate
+        Dropout rate for the final classification layer.
+    width_mult
+        Width multiplier for the model.
+    embed_dim
+        expanded_ratio for embedding dim, where embedding dim is 196 x embed_dim
+    bn_eps
+        Epsilon for batch normalization.
+    bn_momentum
+        Momentum for batch normalization.
     search_mlp_ratio
         The search space of MLP ratio. Use a list to specify search range.
     search_num_heads
         The search space of number of heads. Use a list to specify search range.
     search_depth
         The search space of depth. Use a list to specify search range.
-    img_size
-        Size of input image.
-    patch_size
-        Size of image patch.
-    in_channels
-        Number of channels of the input image.
-    num_labels
-        Number of classes for classifier.
     qkv_bias
         Whether to use bias item in the qkv embedding.
     drop_rate
@@ -198,6 +308,7 @@ class MobileViT(ModelSpace):
             "mlp":MutableLinear(cast(int, embed_dim), num_labels),
             "kan":Mutable_KAN([cast(int, embed_dim), num_labels], base_activation=nn.Softmax)
         }, label='head')
+
     @classmethod
     def extra_oneshot_hooks(cls, strategy):
         # General hooks agnostic to strategy.

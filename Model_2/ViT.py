@@ -14,61 +14,15 @@ from nni.nas.space import current_model
 from nni.nas.profiler.pytorch.flops import FlopsResult
 from nni.nas.profiler.pytorch.utils import MutableShape, ShapeTensor, profiler_leaf_module
 from nni.nas.hub.pytorch.utils.nn import DropPath
-
-class RelativePosition2D(nn.Module):
-    """The implementation of relative position encoding for 2D image feature maps.
-
-    Used in :class:`RelativePositionSelfAttention`.
-    """
-
-    def __init__(self, head_embed_dim: int, length: int = 14) -> None:
-        super().__init__()
-        self.head_embed_dim = head_embed_dim
-        self.length = length
-        self.embeddings_table_v = nn.Parameter(torch.randn(length * 2 + 2, head_embed_dim))
-        self.embeddings_table_h = nn.Parameter(torch.randn(length * 2 + 2, head_embed_dim))
-
-        nn.init.trunc_normal_(self.embeddings_table_v, std=.02)
-        nn.init.trunc_normal_(self.embeddings_table_h, std=.02)
-
-    def forward(self, length_q, length_k):
-        # remove the first cls token distance computation
-        length_q = length_q - 1
-        length_k = length_k - 1
-        # init in the device directly, rather than move to device
-        range_vec_q = torch.arange(length_q, device=self.embeddings_table_v.device)
-        range_vec_k = torch.arange(length_k, device=self.embeddings_table_v.device)
-        # compute the row and column distance
-        length_q_sqrt = int(length_q ** 0.5)
-        distance_mat_v = (
-            torch.div(range_vec_k[None, :], length_q_sqrt, rounding_mode='trunc') -
-            torch.div(range_vec_q[:, None], length_q_sqrt, rounding_mode='trunc')
-        )
-        distance_mat_h = (range_vec_k[None, :] % length_q_sqrt - range_vec_q[:, None] % length_q_sqrt)
-        # clip the distance to the range of [-length, length]
-        distance_mat_clipped_v = torch.clamp(distance_mat_v, - self.length, self.length)
-        distance_mat_clipped_h = torch.clamp(distance_mat_h, - self.length, self.length)
-
-        # translate the distance from [1, 2 * length + 1], 0 is for the cls token
-        final_mat_v = distance_mat_clipped_v + self.length + 1
-        final_mat_h = distance_mat_clipped_h + self.length + 1
-        # pad the 0 which represent the cls token
-        final_mat_v = F.pad(final_mat_v, (1, 0, 1, 0), "constant", 0)
-        final_mat_h = F.pad(final_mat_h, (1, 0, 1, 0), "constant", 0)
-
-        final_mat_v = final_mat_v.long()
-        final_mat_h = final_mat_h.long()
-        # get the embeddings with the corresponding distance
-        embeddings = self.embeddings_table_v[final_mat_v] + self.embeddings_table_h[final_mat_h]
-
-        return embeddings
+from nni.nas.hub.pytorch.autoformer import RelativePosition2D
 
 
 @profiler_leaf_module
 class RelativePositionSelfAttention(MutableModule):
     """
     This class is designed to support the `relative position <https://arxiv.org/pdf/1803.02155v2.pdf>`__ in attention.
-
+    This modification add simple ".to(x.device)" to handling cpu and gpu issue
+    
     Different from the absolute position embedding,
     the relative position embedding encodes relative distance between input tokens and learn the pairwise relations of them.
     It is commonly calculated via a look-up table with learnable parameters,
@@ -229,6 +183,7 @@ class TransformerEncoderLayer(nn.Module):
     Multi-head attention + FC + Layer-norm + Dropout.
 
     Similar to PyTorch's ``nn.TransformerEncoderLayer`` but supports :class:`RelativePositionSelfAttention`.
+    This modification add simple ".to(x.device)" to handling cpu and gpu issue
 
     Parameters
     ----------
@@ -256,7 +211,6 @@ class TransformerEncoderLayer(nn.Module):
         drop_path: float = 0.,
         drop_rate: float = 0.,
         pre_norm: bool = True,
-        act_fn = torch.nn.ReLU,
         **kwargs
     ):
         super().__init__()
@@ -328,6 +282,7 @@ class TransformerEncoderLayer(nn.Module):
 class ClassToken(ParametrizedModule):
     """
     Concat `class token <https://arxiv.org/abs/2010.11929>`__ before patch embedding.
+    This modification add simple ".to(x.device)" to handling cpu and gpu issue
 
     Parameters
     ----------
@@ -351,7 +306,10 @@ class ClassToken(ParametrizedModule):
 
 
 class AbsolutePositionEmbedding(ParametrizedModule):
-    """Add absolute position embedding on patch embedding."""
+    """
+    Add absolute position embedding on patch embedding.    
+    This modification add simple ".to(x.device)" to handling cpu and gpu issue
+    """
 
     def __init__(self, length: int, embed_dim: int):
         super().__init__()
