@@ -5,5 +5,8 @@ __pycache__/
 *.gz
 *.nii
 *.onnx
+*.ckpt
 *.nii.gz
+*.csv
+*_files_*
 lightning_logs/

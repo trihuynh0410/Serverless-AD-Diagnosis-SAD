@@ -259,7 +259,7 @@ class MobileViT(ModelSpace):
 
         blocks: List[nn.Module] = [
             # first stage is fixed
-            DepthwiseSeparableConv(widths[0], widths[1], kernel_size=3, stride=1)
+            DepthwiseSeparableConv(widths[0], widths[1], kernel_size=3, stride=2)
         ]
 
         # https://github.com/ultmaster/AceNAS/blob/46c8895fd8a05ffbc61a6b44f1e813f64b4f66b7/searchspace/proxylessnas/__init__.py#L21
@@ -278,7 +278,7 @@ class MobileViT(ModelSpace):
         self.blocks = nn.Sequential(*blocks)
 
         self.patches_num = num_slices_per_image
-        embed_dim = embed_dim*14*14
+        embed_dim = embed_dim*7*7
         self.cls_token = ClassToken(cast(int, embed_dim))
         self.pos_embed = AbsolutePositionEmbedding(self.patches_num + 1, cast(int, embed_dim)) if absolute_position else nn.Identity()
 
