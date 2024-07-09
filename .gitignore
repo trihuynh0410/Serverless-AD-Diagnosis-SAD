@@ -8,5 +8,6 @@ __pycache__/
 *.ckpt
 *.nii.gz
 *.csv
-*_files_*
+*_arch_*
+*.json
 lightning_logs/

@@ -1,4 +1,4 @@
-from typing import Tuple, List, Union, Callable, Optional, cast, Any
+from typing import Tuple, List, Union, cast, Any
 
 import torch, math, nni
 from torch import nn
@@ -9,106 +9,14 @@ from nni.nas.nn.pytorch import (
     MutableLinear, MutableLayerNorm, MutableLinear, MutableBatchNorm2d
 )
 from nni.nas.oneshot.pytorch.supermodule.operation import MixedOperation
-from nni.nas.hub.pytorch.proxylessnas import make_divisible, simplify_sequential, ConvBNReLU, DepthwiseSeparableConv
+from nni.nas.hub.pytorch.proxylessnas import make_divisible, ConvBNReLU, DepthwiseSeparableConv
 
-from KANLinear import Mutable_KAN
-from ViT import *
+from Model.architecture.KANLinear import Mutable_KAN
+from Model.architecture.ViT import *
+from Model.architecture.MobileVitV4 import *
 
 MaybeIntChoice = Union[int, MutableExpression]
 
-class UniversialInvertedResidual(nn.Sequential):
-    """
-    An Universial Inverted Residual Block, originally proposed for the `MobileNetV4 <https://arxiv.org/abs/2404.10518>`.
-    It follows a structure of:
-        - Optional first depthwise
-        - First pointwise
-        - Optional second depthwise
-        - Second pointwise
-
-    This implementation is the modification of inverted residual block of NNI:
-
-    - https://github.com/microsoft/nni/blob/master/examples/nas/legacy/cream/lib/models/blocks/inverted_residual_block.py#L11
-
-    Parameters
-    ----------
-    in_channels
-        The number of input channels. Can be a value choice.
-    out_channels
-        The number of output channels. Can be a value choice.
-    expand_ratio
-        The ratio of intermediate channels with respect to input channels. Can be a value choice.
-    kernel_size
-        The kernel size of the depthwise convolution. Can be a value choice.
-    stride
-        The stride of the depthwise convolution.
-    squeeze_excite
-        Callable to create squeeze and excitation layer. Take hidden channels and input channels as arguments.
-    norm_layer
-        Callable to create normalization layer. Take input channels as argument.
-    activation_layer
-        Callable to create activation layer. No input arguments.
-    first_conv
-        Whether to use the first depthwise convolution
-    second_conv
-        Whether to use the second depthwise convolution
-    """
-
-    def __init__(
-        self,
-        in_channels: MaybeIntChoice,
-        out_channels: MaybeIntChoice,
-        expand_ratio: Union[float, MutableExpression[float]],
-        kernel_size: MaybeIntChoice = 3,
-        stride: int = 1,
-        squeeze_excite: Optional[Callable[[MaybeIntChoice, MaybeIntChoice], nn.Module]] = None,
-        norm_layer: Optional[Callable[[int], nn.Module]] = None,
-        activation_layer: Optional[Callable[..., nn.Module]] = None,
-        first_conv: bool = False,
-        second_conv: bool = False,
-    ) -> None:
-        super().__init__()
-        self.stride = stride
-        self.out_channels = out_channels
-        assert stride in [1, 2]
-        hidden_ch = cast(int, make_divisible(in_channels * expand_ratio, 8))
-
-        # NOTE: this equivalence check (==) does NOT work for ValueChoice, need to use "is"
-        self.has_skip = stride == 1 and in_channels is out_channels
-
-        first_depth = ConvBNReLU(in_channels, in_channels, stride=stride, kernel_size=kernel_size, groups=in_channels,
-                       norm_layer=norm_layer, activation_layer=activation_layer) if first_conv else nn.Identity()
-        if first_conv and second_conv:
-            stride = 1
-        Second_depth = ConvBNReLU(hidden_ch, hidden_ch, stride=stride, kernel_size=kernel_size, groups=hidden_ch,
-                       norm_layer=norm_layer, activation_layer=activation_layer) if second_conv else nn.Identity()
-                
-        layers: List[nn.Module] = [
-            # first depth-wise
-            first_depth,
-            # point-wise convolution
-            # NOTE: some paper omit this point-wise convolution when stride = 1.
-            # In our implementation, if this pw convolution is intended to be omitted,
-            # please use SepConv instead.
-            ConvBNReLU(in_channels, hidden_ch, kernel_size=1,
-                       norm_layer=norm_layer, activation_layer=activation_layer),
-            # second depth-wise
-            Second_depth,
-            # SE
-            squeeze_excite(
-                cast(int, hidden_ch),
-                cast(int, in_channels)
-            ) if squeeze_excite is not None else nn.Identity(),
-            # pw-linear
-            ConvBNReLU(hidden_ch, out_channels, kernel_size=1, norm_layer=norm_layer, activation_layer=nn.Identity),
-        ]
-
-        super().__init__(*simplify_sequential(layers))
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if self.has_skip:
-            return x + super().forward(x)
-        else:
-            return super().forward(x)
 
 def inverted_residual_choice_builder(
     expand_ratios: List[int],
@@ -165,7 +73,6 @@ class MobileViT(ModelSpace):
     All 2d slice after layer belongs to ProxylessNAS for position embeded, 
     will be treated as patches as input for AutoFormer parts
 
-
     This search space is mixture of two search space:
         - `ProxylessNAS <https://arxiv.org/abs/1812.00332>`__
         - `AutoFormer <https://arxiv.org/abs/2107.00651>`__
@@ -179,7 +86,7 @@ class MobileViT(ModelSpace):
     num_labels
         Number of class to classify
     num_slices_per_image
-        Number of 2d slices of 3d image, also number of patches
+        Number of 2d slices taken from 3d image, also number of patches
     base_widths
         Widths of each stage, from stem, to body, to head. Length should be 5.
     dropout_rate
