@@ -11,8 +11,8 @@ from nni.nas.hub.pytorch.nasnet import (
     Zero, FactorizedReduce, CellPreprocessor, CellPostprocessor, NDSStage, NDSStageDifferentiable, NDSStagePathSampling
 )
 
-from Model.architecture.KANLinear import KanWarapper
-from Model.architecture.MobileVitV4 import UniversialInvertedResidual, _se_or_skip
+from architecture.KANLinear import KanWarapper
+from architecture.MobileVitV4 import UniversialInvertedResidual, _se_or_skip
 
 MaybeIntChoice = Union[int, MutableExpression]
 
