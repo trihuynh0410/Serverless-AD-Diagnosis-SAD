@@ -302,7 +302,7 @@ class KanWarapper(nn.Module):
     def __init__(self, in_channel, out_channel, base_activation):
         super().__init__()
 
-        self.proj_func = Mutable_KAN([in_channel, out_channel], base_activation=base_activation)
+        self.proj_func = Mutable_KAN([in_channel, in_channel//2, out_channel], base_activation=base_activation)
 
     def forward(self, x):
         x = self.to_last_dim(x)
