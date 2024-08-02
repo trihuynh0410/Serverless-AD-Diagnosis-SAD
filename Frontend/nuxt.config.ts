@@ -6,7 +6,7 @@ dotenv.config();
 
 export default defineNuxtConfig({
   nitro: {
-    preset: 'cloudflare-pages'
+    preset: 'aws-lambda'
   },
   devtools: { enabled: true },
   modules: ['@nuxt/ui', 'nuxt-icon-tw'],
