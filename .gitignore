@@ -9,7 +9,6 @@ __pycache__/
 *.nii.gz
 *.csv
 *_arch_*
-*.json
 lightning_logs/
 .env
 *venv
