@@ -11,3 +11,5 @@ __pycache__/
 *_arch_*
 *.json
 lightning_logs/
+.env
+*venv
