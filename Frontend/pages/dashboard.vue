@@ -1,13 +1,19 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch, watchEffect, createApp } from "vue";
 import App from "../app.vue";
-import { useFetch, useState, navigateTo, useRoute } from "nuxt/app";
+import {
+  useFetch,
+  useState,
+  navigateTo,
+  useRoute,
+  useRuntimeConfig,
+} from "nuxt/app";
 import { addOrderModal } from "../stores/storeModal";
 import { storeToRefs, createPinia } from "pinia";
-import NiftiReader from 'nifti-reader-js';
-import * as nifti from 'nifti-reader-js';
-import NiiVueViewer from '../components/NiiVueViewer.vue';
-// import type { FormError, FormSubmitEvent } from '#ui/types'
+import NiftiReader from "nifti-reader-js";
+import * as nifti from "nifti-reader-js";
+import NiiVueViewer from "../components/NiiVueViewer.vue";
+import { useToast } from "../node_modules/@nuxt/ui/dist/runtime/composables/useToast";
 
 const state = reactive({
   id: undefined as number | undefined,
@@ -41,7 +47,7 @@ const genderstatus = ref(false);
 const genderList = ["Male", "Female"];
 const isSubmit = ref(false);
 const isEdit = ref(false);
-// const toast = useToast()
+const toast = useToast();
 const isAddImage = ref(false);
 const selectedImage = ref<ApiImage | null>(null);
 const selectedImageName = ref<string | null>(null);
@@ -53,15 +59,16 @@ const isDelete = ref(false);
 const isPredicting = ref(false);
 const niftiData = ref<ArrayBuffer | null>(null);
 const isLoading = ref(false);
-const BASE_URL =
-  "https://wzs3zykgierjfb6vifyiya2qru0nhbet.lambda-url.ap-southeast-1.on.aws";
+const config = useRuntimeConfig();
+const BASE_URL = config.public.apiBaseUrl;
 const page = ref(1);
 const perPage = ref(8);
 const hasNextPage = ref(true);
-const toast = useState<any>("toast");
+
 const isEditingNote = ref(false);
 const editedNote = ref("");
 const isUpdatingNote = ref(false);
+
 async function fetchData() {
   console.log("Fetching data for page:", page.value);
   const { data, error } = await useFetch<ApiResponse>(
@@ -102,14 +109,19 @@ async function fetchimage() {
 
 const onImageSelect = async (name: string) => {
   isLoading.value = true;
-  selectedImage.value = imageOption.value.find((img) => img.name === name) || null;
+  selectedImage.value =
+    imageOption.value.find((img) => img.name === name) || null;
   showImageInfo.value = !!selectedImage.value;
   isEditingNote.value = false;
+  console.log("NIfTI data prepare");
 
   if (selectedImage.value) {
     try {
       // Call the API to get the presigned URL
-      const { data: presignedUrl } = await useFetch(`${BASE_URL}/images/${selectedImage.value.name}/vilz`);
+      console.log("NIfTI data loading...");
+      const { data: presignedUrl } = await useFetch(
+        `${BASE_URL}/images/${selectedImage.value.name}/vilz`
+      );
 
       if (presignedUrl.value) {
         // Fetch the image data
@@ -119,16 +131,15 @@ const onImageSelect = async (name: string) => {
         // Store the ArrayBuffer directly
         niftiData.value = arrayBuffer;
 
-        console.log('NIfTI data loaded');
+        console.log("NIfTI data loaded");
       }
     } catch (error) {
-      console.error('Error fetching or parsing image:', error);
+      console.error("Error fetching or parsing image:", error);
     } finally {
       isLoading.value = false;
     }
   }
 };
-
 
 watchEffect(() => {
   fetchData();
@@ -148,6 +159,18 @@ function nextPage() {
     page.value++;
     fetchData();
   }
+}
+function formatUnixTimestamp(timestamp: number): string {
+  const date = new Date(timestamp * 1000); // Convert seconds to milliseconds
+  return date.toLocaleString("en-GB", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
 }
 const selected = ref<Patient | null>(null);
 const pinia = createPinia();
@@ -182,7 +205,7 @@ const onSubmitEdit = async () => {
       isEdit.value = false;
       isOpenAddPatient.value = false;
       reloadState.value++;
-      toast.value.add({
+      toast.add({
         title: "Update Patient Success !",
         timeout: 2500,
         color: "blue",
@@ -221,7 +244,7 @@ async function predictImage() {
           imageOption.value[index] = { ...selectedImage.value };
         }
 
-        toast.value.add({
+        toast.add({
           title: "Prediction Updated",
           description: `Prediction for ${selectedImage.value.name} is now ${prediction}`,
           timeout: 2500,
@@ -231,7 +254,7 @@ async function predictImage() {
     }
   } catch (error) {
     console.error("Error predicting image:", error);
-    toast.value.add({
+    toast.add({
       title: "Prediction Failed",
       description: "An error occurred while predicting the image",
       timeout: 2500,
@@ -281,7 +304,7 @@ watch(selected, async () => {
 const columns = [
   {
     key: "id",
-    label: "ID",
+    label: "Created at",
   },
   {
     key: "name",
@@ -335,13 +358,13 @@ const deletePatient = async () => {
   if (data.value && typeof data.value === "object" && "message" in data.value) {
     if (data.value.message === "Patient deleted successfully") {
       reloadState.value++;
-      toast.value.add({
+      toast.add({
         title: "Delete Patient Successfully !",
         timeout: 2500,
         color: "blue",
       });
       isDelete.value = false;
-      selected.value = undefined;
+      // selected.value = undefined;
     }
   }
 };
@@ -380,18 +403,18 @@ async function updateNote() {
         imageOption.value[index] = { ...selectedImage.value };
       }
 
-      //   toast.value.add({
-      //     title: "Note Updated",
-      //     description: "The note has been successfully updated",
-      //     timeout: 2500,
-      //     color: "green",
-      //   });
-
+      toast.add({
+        title: "Note Updated",
+        description: "The note has been successfully updated",
+        timeout: 2500,
+        color: "green",
+      });
+      console.log(toast);
       isEditingNote.value = false;
     }
   } catch (error) {
     console.error("Error updating note:", error);
-    toast.value.add({
+    toast.add({
       title: "Note Update Failed",
       description: "An error occurred while updating the note",
       timeout: 2500,
@@ -403,13 +426,13 @@ async function updateNote() {
   }
 }
 const predictionMap = {
-  0: 'Cognitive Normal',
-  1: 'Mild Cognitive Impairment',
-  2: 'Alzheimer\'s Disease'
+  0: "Cognitive Normal",
+  1: "Mild Cognitive Impairment",
+  2: "Alzheimer's Disease",
 };
 
 const getPredictionText = (predict) => {
-  return predictionMap[predict] || 'Unknown';
+  return predictionMap[predict] || "Unknown";
 };
 const fileInput = ref<HTMLInputElement | null>(null);
 const isUploading = ref(false);
@@ -422,26 +445,23 @@ const uploadFile = async (event: Event) => {
   const fileName = file.name;
 
   try {
-    // Fetch the presigned URL
-      //     const { data: presignedUrl } = await useFetch(`${BASE_URL}/images/${selectedImage.value.name}/vilz`);
-
-      // if (presignedUrl.value) {
-      //   // Fetch the image data
-      //   const response = await fetch(presignedUrl.value as string);
-    const { data: presignedUrl } = await useFetch<string>(`${BASE_URL}/images/upload`, {
-      method: "POST",
-      params: {
-        patient_id: selected.value?.id,
-        file_name: fileName,
-      },
-    });
+    const { data: presignedUrl } = await useFetch<string>(
+      `${BASE_URL}/images/upload`,
+      {
+        method: "POST",
+        params: {
+          patient_id: selected.value?.id,
+          file_name: fileName,
+        },
+      }
+    );
 
     if (presignedUrl.value) {
-const response = await fetch(presignedUrl.value, {
-        method: 'PUT',
+      const response = await fetch(presignedUrl.value, {
+        method: "PUT",
         body: file,
         headers: {
-          'Content-Type': file.type,
+          "Content-Type": file.type,
         },
       });
 
@@ -450,27 +470,27 @@ const response = await fetch(presignedUrl.value, {
       }
 
       // Upload the file to S3
-      
+
       console.log(response);
 
-      //   toast.value.add({
-      //     title: "Upload Success",
-      //     description: `File ${fileName} uploaded successfully`,
-      //     timeout: 2500,
-      //     color: "green",
-      //   });
+      toast.add({
+        title: "Upload Success",
+        description: `File ${fileName} uploaded successfully`,
+        timeout: 2500,
+        color: "green",
+      });
 
       // Optionally, refresh the image list after uploading
       fetchimage();
     }
   } catch (error) {
     console.error("Error uploading file:", error);
-    // toast.value.add({
-    //   title: "Upload Failed",
-    //   description: "An error occurred while uploading the file",
-    //   timeout: 2500,
-    //   color: "red",
-    // });
+    toast.add({
+      title: "Upload Failed",
+      description: "An error occurred while uploading the file",
+      timeout: 2500,
+      color: "red",
+    });
   } finally {
     isUploading.value = false;
     target.value = ""; // Reset file input
@@ -556,10 +576,16 @@ const q = ref("");
             <div class="flex justify-between items-center">
               <h2>Predict:</h2>
               <div v-if="selectedImage?.predict !== -1">
-            <h2 class="prediction-result">{{ getPredictionText(selectedImage?.predict) }}</h2>
+                <h2 class="prediction-result">
+                  {{ getPredictionText(selectedImage?.predict) }}
+                </h2>
               </div>
               <div v-else>
-                <UButton @click="predictImage" :loading="isPredicting" class="custom-button">
+                <UButton
+                  @click="predictImage"
+                  :loading="isPredicting"
+                  class="custom-button"
+                >
                   Predict Image
                 </UButton>
               </div>
@@ -567,7 +593,11 @@ const q = ref("");
             <div class="flex flex-col space-y-2">
               <div class="flex justify-between items-center">
                 <h2>Note:</h2>
-                <UButton @click="toggleNoteEdit" size="sm" class="custom-button">
+                <UButton
+                  @click="toggleNoteEdit"
+                  size="sm"
+                  class="custom-button"
+                >
                   {{ isEditingNote ? "Cancel" : "Edit Note" }}
                 </UButton>
               </div>
@@ -581,7 +611,11 @@ const q = ref("");
                   rows="3"
                   class="custom-textarea"
                 />
-                <UButton @click="updateNote" :loading="isUpdatingNote" class="custom-button">
+                <UButton
+                  @click="updateNote"
+                  :loading="isUpdatingNote"
+                  class="custom-button"
+                >
                   Save Note
                 </UButton>
               </div>
@@ -599,17 +633,16 @@ const q = ref("");
             </h2>
             <h1 class="text-xl font-medium text-center pt-4">
               BME Thesis Project
-              <span class="font-bold project-title">Serverless Alzheimer Diagnosis</span>
+              <span class="font-bold project-title"
+                >Serverless Alzheimer Diagnosis</span
+              >
             </h1>
             <div class="flex items-center justify-center space-x-1">
+              <UAvatar src="/images/iu.png" alt="IU logo" size="lg" />
+              <UAvatar src="/images/bme.png" alt="BME logo" size="lg" />
               <UAvatar
-                src="https://i.ibb.co/sQPkGfj/eabedf33a318f626fcc0f14b799ea73e.png"
-                alt="Girl in a jacket"
-                size="lg"
-              />
-              <UAvatar
-                src="https://i.ibb.co/KVQjzHh/a4e0e78ae6864eff3f8a2b17e3596811.png"
-                alt="Girl in a jacket"
+                src="/images/bhl.png"
+                alt="Brain Health Lab logo"
                 size="lg"
               />
             </div>
@@ -631,10 +664,12 @@ const q = ref("");
                 icon="i-heroicons-magnifying-glass-20-solid"
                 class="custom-input"
               />
-            <UButton class="rounded-lg ml-4 custom-button" @click="isOpenAddPatient = true">
-              <Icon size="20px" name="i-heroicons-plus" />
-            </UButton>
-              
+              <UButton
+                class="rounded-lg ml-4 custom-button"
+                @click="isOpenAddPatient = true"
+              >
+                <Icon size="20px" name="i-heroicons-plus" />
+              </UButton>
             </div>
             <NuxtErrorBoundary>
               <UTable
@@ -653,10 +688,15 @@ const q = ref("");
                     />
                   </UDropdown>
                 </template>
-                <template v-if="selected" #id-data="{ row }">
+
+                <template #id-data="{ row }">
                   <span
-                    :class="{ 'highlighted-row': selected.id === row.id }"
-                  >{{ row.id }}</span>
+                    :class="{
+                      'highlighted-row': selected && selected.id === row.id,
+                    }"
+                  >
+                    {{ formatUnixTimestamp(row.id) }}
+                  </span>
                 </template>
               </UTable>
               <template #error="{ error }">
@@ -667,27 +707,27 @@ const q = ref("");
               <div
                 class="bg-white rounded-lg border border-gray-200 flex items-center"
               >
-              <UButton
-                variant="ghost"
-                class="px-3 focus:outline-none focus:ring focus:ring-blue-200 pagination-button"
-                :class="{ 'pagination-button-disabled': page <= 1 }"
-                :disabled="page <= 1"
-                @click="page--"
-              >
-                Previous
-              </UButton>
+                <UButton
+                  variant="ghost"
+                  class="px-3 focus:outline-none focus:ring focus:ring-blue-200 pagination-button"
+                  :class="{ 'pagination-button-disabled': page <= 1 }"
+                  :disabled="page <= 1"
+                  @click="page--"
+                >
+                  Previous
+                </UButton>
 
-              <span class="mx-4 pagination-text">{{ page }}</span>
+                <span class="mx-4 pagination-text">{{ page }}</span>
 
-              <UButton
-                variant="ghost"
-                class="px-3 focus:outline-none focus:ring focus:ring-blue-200 pagination-button"
-                :class="{ 'pagination-button-disabled': !hasNextPage }"
-                :disabled="!hasNextPage"
-                @click="page++"
-              >
-                Next
-              </UButton>
+                <UButton
+                  variant="ghost"
+                  class="px-3 focus:outline-none focus:ring focus:ring-blue-200 pagination-button"
+                  :class="{ 'pagination-button-disabled': !hasNextPage }"
+                  :disabled="!hasNextPage"
+                  @click="page++"
+                >
+                  Next
+                </UButton>
               </div>
             </div>
 
@@ -726,7 +766,11 @@ const q = ref("");
                     <UInput v-model="state.name" class="custom-input" />
                   </UFormGroup>
                   <UFormGroup label="Date Of Birth" name="dob">
-                    <UInput v-model="state.dob" :placeholder="'yyyy-MM-dd'" class="custom-input" />
+                    <UInput
+                      v-model="state.dob"
+                      :placeholder="'yyyy-MM-dd'"
+                      class="custom-input"
+                    />
                   </UFormGroup>
                   <UFormGroup label="Gender" name="gender">
                     <USelect
@@ -736,7 +780,11 @@ const q = ref("");
                       class="custom-select"
                     />
                   </UFormGroup>
-                  <UButton type="submit" :disabled="isSubmit" class="custom-button">
+                  <UButton
+                    type="submit"
+                    :disabled="isSubmit"
+                    class="custom-button"
+                  >
                     Edit Patient
                   </UButton>
                 </UForm>
@@ -747,16 +795,16 @@ const q = ref("");
         <template v-else>
           <div class="p-4">
             <h1 class="text-2xl font-bold mb-4">Image Details</h1>
-            
-            <div v-if="isLoading" class="mt-4">
-              Loading image data...
-            </div>
-            
+
+            <div v-if="isLoading" class="mt-4">Loading image data...</div>
+
             <div v-else-if="niftiData" class="mt-4">
               <NiiVueViewer :niftiData="niftiData" />
             </div>
 
-            <UButton @click="clearSelectedImage" class="mt-4 custom-button">Back to Patient List</UButton>
+            <UButton @click="clearSelectedImage" class="mt-4 custom-button"
+              >Back to Patient List</UButton
+            >
           </div>
         </template>
       </div>
@@ -766,17 +814,17 @@ const q = ref("");
 
 <style>
 :root {
-  --primary-color: #3B82F6;
-  --secondary-color: #F8F8F8;
-  --background-color: #FFFFFF;
+  --primary-color: #3b82f6;
+  --secondary-color: #f8f8f8;
+  --background-color: #ffffff;
   --text-color: #000000;
-  --accent-color: #FF0000;
-  --button-bg-color: #F8F8F8;
+  --accent-color: #ff0000;
+  --button-bg-color: #f8f8f8;
   --button-text-color: #000000;
-  --button-disabled-bg-color: #E0E0E0;
-  --button-disabled-text-color: #A0A0A0;
-  --button-hover-bg-color: #B4D4FF;
-  --button-hover-text-color: #FFFFFF;
+  --button-disabled-bg-color: #e0e0e0;
+  --button-disabled-text-color: #a0a0a0;
+  --button-hover-bg-color: #b4d4ff;
+  --button-hover-text-color: #ffffff;
 }
 </style>
 
@@ -786,7 +834,9 @@ const q = ref("");
   color: var(--text-color);
 }
 
-.patient-info, .image-info, .footer-info {
+.patient-info,
+.image-info,
+.footer-info {
   background-color: var(--secondary-color);
 }
 
@@ -804,7 +854,9 @@ const q = ref("");
   color: var(--button-text-color) !important;
 }
 
-.custom-input, .custom-select, .custom-textarea {
+.custom-input,
+.custom-select,
+.custom-textarea {
   background-color: var(--background-color) !important;
   color: var(--text-color) !important;
 }
@@ -840,7 +892,6 @@ const q = ref("");
 .pagination-button:hover:not(:disabled) {
   background-color: var(--button-hover-bg-color) !important;
   color: var(--button-hover-text-color) !important;
-
 }
 
 .pagination-button-disabled {

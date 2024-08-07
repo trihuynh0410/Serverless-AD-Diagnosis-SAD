@@ -1,33 +1,37 @@
-import boto3, time, os
+import boto3, time, os, random
 
 from datetime import datetime
 from fastapi import FastAPI, UploadFile, File, Query
 from fastapi.responses import FileResponse
+from fastapi.middleware.cors import CORSMiddleware
+from model_utils import load_and_preprocess_image, predict, model
 
 from mangum import Mangum
 from boto3.dynamodb.conditions import Key
 from pydantic import BaseModel, Field
 from typing import Optional
 from boto3.dynamodb.types import TypeDeserializer
-from dotenv import load_dotenv
-load_dotenv()
-AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
-AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
-DYNAMODB_URL = os.getenv("DYNAMODB_URL")
-S3_BUCKET_NAME='thesis-ad'
-s3_client = boto3.client('s3',
-                        aws_access_key_id=AWS_ACCESS_KEY_ID,
-                        aws_secret_access_key=AWS_SECRET_ACCESS_KEY)
 
-dynamodb_resource = boto3.resource('dynamodb', endpoint_url=DYNAMODB_URL)
-dynamodb_client = boto3.client('dynamodb', endpoint_url=DYNAMODB_URL)
+S3_BUCKET_NAME=os.getenv("S3_BUCKET_NAME")
+TEMP_DIR = '/tmp'
+
+s3_client = boto3.client('s3') 
+dynamodb_resource = boto3.resource('dynamodb')
+dynamodb_client = boto3.client('dynamodb')
 
 patient_info = dynamodb_resource.Table('patient_info')
 fsl = dynamodb_resource.Table('fsl')
 
 deserializer = TypeDeserializer()
-
 app = FastAPI()
+# app.add_middleware(
+#     CORSMiddleware,
+#     allow_origins=["*"],  # Allows all origins
+#     allow_credentials=True,
+#     allow_methods=["*"],  # Allows all methods
+#     allow_headers=["*"],  # Allows all headers
+# )
+handler = Mangum(app)
 
 class Patient(BaseModel):
     id: int = Field(default_factory=lambda: int(time.time()))
@@ -42,22 +46,9 @@ class Fsl(BaseModel):
     predict: Optional[int] = -1
     note: Optional[str] = None
 
-temp_dir = '/tmp'
-os.makedirs(temp_dir, exist_ok=True)
-print(f"Temporary directory full path: {os.path.abspath(temp_dir)}")
 
 @app.post("/patients")
 def add_patient(patient: Patient):
-    """
-    Adds a new patient to the database.
-
-    Args:
-        patient (Patient): Patient data (name, date of birth, gender).
-
-    Returns:
-        dict: A message indicating success or that the patient already exists.
-    """
-
     response = patient_info.query(
         IndexName='info',
         KeyConditionExpression=boto3.dynamodb.conditions.Key('name').eq(patient.name) & 
@@ -69,22 +60,12 @@ def add_patient(patient: Patient):
         return {"message": "Patient already exists", "patient_id": id}    
     else:
         patient.id = int(time.time())
-        patient_info.put_item(Item=patient.model_dump())
+        patient_info.put_item(Item=patient.dict())
         return {"message": "Patient added successfully"}
 
 
 @app.get("/patients")
 def get_patient(name: str, dob: str = None):
-    """
-    Retrieves patient information based on name and optional date of birth.
-
-    Args:
-        name (str): The patient's name.
-        dob (str, optional): The patient's date of birth (YYYY-MM-DD).
-
-    Returns:
-        list: A list of matching patient records.
-    """
     if dob:
         response = patient_info.query(
             IndexName='info',  
@@ -101,16 +82,6 @@ def get_patient(name: str, dob: str = None):
 
 @app.put("/patients/{patient_id}")
 def modify_patient(patient_id: int, patient: Patient):
-    """
-    Updates the information of an existing patient.
-
-    Args:
-        patient_id (int): The unique ID of the patient.
-        patient (Patient): The updated patient data.
-
-    Returns:
-        dict: A message indicating successful update.
-    """
     patient_info.update_item(
         Key={'id': patient_id},
         UpdateExpression="set #n = :n, dob = :d, gender = :g",
@@ -126,16 +97,8 @@ def modify_patient(patient_id: int, patient: Patient):
 
 @app.delete("/patients/{patient_id}")
 def delete_patient(patient_id: int):
-    """
-    Deletes a patient from the database.
-
-    Args:
-        patient_id (int): The unique ID of the patient to delete.
-
-    Returns:
-        dict: A message indicating successful deletion.
-    """
     patient_info.delete_item(Key={'id': patient_id})
+    fsl.delete_item(Key={'id': patient_id})
     return {"message": "Patient deleted successfully"}
 
 
@@ -173,42 +136,23 @@ def get_latest_patients(
 
     return {
         "patients": paginated_metadata,
-        "page": page,
-        "per_page": per_page,
         "has_next_page": has_next_page
     }
 
 
-
-
 @app.post("/images/upload")
-def upload(
-    patient_id: int, 
-    file: UploadFile = File(...)
-):
-    """
-    Uploads an image to S3 and stores its information in the database.
+def upload(patient_id: int, file_name: str ):
 
-    Args:
-        patient_id (int): The ID of the patient the image is associated with.
-        file (UploadFile): The image file to upload.
+    s3_key = f"ori/{file_name}"
+    presigned_url = s3_client.generate_presigned_url(
+        ClientMethod='put_object',
+        Params={'Bucket': S3_BUCKET_NAME, 'Key': s3_key},
+        ExpiresIn=300  # Adjust expiration time as needed
+    )    
+    item = Fsl(id=patient_id, name=file_name)
+    fsl.put_item(Item=item.dict())
 
-    Returns:
-        dict: A message indicating success.
-    """
-    file_path = os.path.join(temp_dir, file.filename)
-    with open(file_path, "wb") as buffer:
-        buffer.write(file.file.read())
-
-    nii_file = file.filename
-
-    s3_key = f"ori/{nii_file}"
-    # s3_client.upload_file(file_path, S3_BUCKET_NAME, s3_key)
-    print(s3_key)
-    item = Fsl(id=patient_id, name=nii_file)
-    fsl.put_item(Item=item.model_dump())
-
-    return {"message": "Upload and DB update successful!"}
+    return presigned_url
 
 
 @app.get("/images/{patient_id}")
@@ -238,12 +182,6 @@ def get_images_info(patient_id: int, date: str = None):
 
 @app.get("/images")
 def get_latest_images():
-    """
-    Fetches information about the latest images uploaded to the system.
-
-    Returns:
-        list: A list of metadata for the latest images.
-    """
     now = int(time.time())
 
     response = dynamodb_client.execute_statement(
@@ -258,22 +196,49 @@ def get_latest_images():
     return metadata if 'Items' in response else []
 
 
-@app.get("/images/{image_name}/types/{type_img}")
-def get_image_for_visualization(image_name: str, type_img: bool):
-    """
-    Downloads an image from S3 for visualization.
+@app.get("/images/{image_name}/vilz")
+def get_image_for_visualization(image_name: str):
 
-    Args:
-        image_name (str): The name of the image file.
-        type_img (bool): True for FSL image, False for original image.
+    s3_key = f"fsl/{image_name}" if image_name.endswith(".gz") else f"fsl/{image_name}.gz"
+    presigned_url = s3_client.generate_presigned_url(
+        ClientMethod='get_object',
+        Params={'Bucket': S3_BUCKET_NAME, 'Key': s3_key},
+        ExpiresIn=300
+    )
+    return presigned_url
 
-    Returns:
-        FileResponse: The image file as a response.
-    """
-    local_path = f"/tmp/{image_name}"
-    print(local_path)
-    s3_key = f"ori/{image_name}" if not type_img else f"fsl/{image_name}.gz"
-    s3_client.download_file(S3_BUCKET_NAME, s3_key, local_path)
-    return FileResponse(local_path, media_type='application/octet-stream', filename=image_name)
+@app.post("/patients/{patient_id}/images/{image_name}/at/{day_upload}")
+def predict_and_update(patient_id: int, image_name: str, day_upload: int):
 
-handler = Mangum(app)
+    s3_key = f"fsl/{image_name}.gz"
+    
+    local_file_path = os.path.join(TEMP_DIR, image_name)
+    s3_client.download_file(S3_BUCKET_NAME, s3_key, local_file_path)
+    
+    image = load_and_preprocess_image(local_file_path)
+    
+    predicted_class, _ = predict(model, image)
+    
+    fsl.update_item(
+        Key={'id': patient_id, 'day_upload': day_upload},
+        UpdateExpression="SET predict = :p",
+        ExpressionAttributeValues={':p': predicted_class}
+    )
+    
+    os.remove(local_file_path)
+    
+    return {
+        "message": f"Prediction ({predicted_class}) and update successful for image {image_name}",
+    }
+
+
+@app.post("/patients/{patient_id}/day/{day_upload}/note")
+def update_note(patient_id: int, day_upload: int, note: str):
+    fsl.update_item(
+        Key={'id': patient_id, 'day_upload': day_upload},
+        UpdateExpression="SET note = :n",
+        ExpressionAttributeValues={':n': note}
+    )
+
+    return {"message": f"Note update successful for patient {patient_id} on day {day_upload}"}
+

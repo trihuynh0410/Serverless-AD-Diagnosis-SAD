@@ -14,7 +14,7 @@ export default defineNuxtConfig({
   // Make environment variables available on the client-side
   runtimeConfig: {
     public: {
-      API_BASE_URL: process.env.API_BASE_URL,
+      apiBaseUrl: process.env.API_BASE_URL,
     },
   },
   

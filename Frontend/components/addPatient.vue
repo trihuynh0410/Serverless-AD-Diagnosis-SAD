@@ -31,14 +31,21 @@
 
 <script setup lang="ts">
 const genderList = ['Male', 'Female']
-import type { FormError, FormSubmitEvent } from '#ui/types'
-import { addOrderModal } from '~/stores/storeModal'
+import { ref, reactive} from "vue";
+import type { FormError, FormSubmitEvent } from '../node_modules/@nuxt/ui/dist/runtime/types'
+import { addOrderModal } from '../stores/storeModal'
 import { storeToRefs } from "pinia";
+import { useToast } from '../node_modules/@nuxt/ui/dist/runtime/composables/useToast'
+import { useFetch, useRuntimeConfig } from "nuxt/app";
+
+const config = useRuntimeConfig()
+const BASE_URL = config.public.apiBaseUrl
+
 const toast = useToast()
 const isOpenAddPatient = storeToRefs(addOrderModal()).addPatientState;
 const reloadState = storeToRefs(addOrderModal()).reloadState;
 const isSubmit = ref(false);
-const genderstatus = ref(-1);
+const genderstatus = ref(false);
 const state = reactive({
   name: undefined,
   dob: undefined,
@@ -73,7 +80,7 @@ const onSubmit = async () => {
     genderstatus.value = false
   }
   console.log(genderstatus.value + ' this is gender status')
-  const { data, pending, error, refresh } = await useFetch('https://wzs3zykgierjfb6vifyiya2qru0nhbet.lambda-url.ap-southeast-1.on.aws/patients', {
+  const { data, pending, error, refresh } = await useFetch(`${BASE_URL}/patients`, {
     method: 'post',
     body: {
       name: state.name,
@@ -84,12 +91,15 @@ const onSubmit = async () => {
 
   console.log(data)
   console.log(error)
+    if (data.value && typeof data.value === "object" && "message" in data.value) {
+
   if (data.value.message === 'Patient added successfully') {
     isSubmit.value = false;
     isOpenAddPatient.value = false
     reloadState.value++
     toast.add({ title: 'Add Patient Success !', timeout: 2500 , color: 'blue'})
   }
+    }
 }
 </script>
 
