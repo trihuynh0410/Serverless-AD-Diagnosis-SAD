@@ -370,6 +370,10 @@ const deletePatient = async () => {
         color: "blue",
       });
       isDelete.value = false;
+      await fetchData();
+        if (selected.value && selected.value.id === deleteId.value) {
+          selected.value = null;
+        }
       // selected.value = undefined;
     }
   }
