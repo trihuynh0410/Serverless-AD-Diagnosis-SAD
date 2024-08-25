@@ -70,7 +70,6 @@ const editedNote = ref("");
 const isUpdatingNote = ref(false);
 
 async function fetchData() {
-  console.log("Fetching data for page:", page.value);
   const { data, error } = await useFetch<ApiResponse>(
     `${BASE_URL}/patients/latest`,
     {
@@ -83,6 +82,9 @@ async function fetchData() {
       },
     }
   );
+  console.log("Fetching data for page:", page.value);
+  console.log("Data fetched:", data.value);
+
   if (data.value && data.value.patients) {
     peopleData.splice(
       0,
