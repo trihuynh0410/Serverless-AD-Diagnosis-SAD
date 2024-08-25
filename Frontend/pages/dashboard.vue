@@ -76,6 +76,7 @@ async function fetchData() {
       params: {
         page: page.value,
         per_page: perPage.value,
+        _: Date.now()
       },
       headers: {
         "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -149,9 +150,9 @@ const onImageSelect = async (name: string) => {
 watchEffect(() => {
   fetchData();
 });
-watch(page, () => {
-  fetchData();
-});
+// watch(page, () => {
+//   fetchData();
+// });
 function previousPage() {
   if (page.value > 1) {
     page.value--;
