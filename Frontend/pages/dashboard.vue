@@ -78,6 +78,9 @@ async function fetchData() {
         page: page.value,
         per_page: perPage.value,
       },
+      headers: {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+      },
     }
   );
   if (data.value && data.value.patients) {
