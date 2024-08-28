@@ -685,13 +685,6 @@ const q = ref("");
             <div
               class="flex justify-between px-3 py-3.5 border-b border-gray-200 dark:border-gray-700"
             >
-              <UInput
-                v-model="q"
-                placeholder="Search..."
-                trailing
-                icon="i-heroicons-magnifying-glass-20-solid"
-                class="custom-input"
-              />
               <UButton
                 class="rounded-lg ml-4 custom-button"
                 @click="isOpenAddPatient = true"
