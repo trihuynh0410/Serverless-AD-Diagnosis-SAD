@@ -123,21 +123,32 @@ const onImageSelect = async (name: string) => {
 
   if (selectedImage.value) {
     try {
-      // Call the API to get the presigned URL
       console.log("NIfTI data loading...");
-      const { data: presignedUrl } = await useFetch(
+      const { data: presignedUrls } = await useFetch<{ fsl: string, ori: string }>(
         `${BASE_URL}/images/${selectedImage.value.name}/vilz`
       );
 
-      if (presignedUrl.value) {
-        // Fetch the image data
-        const response = await fetch(presignedUrl.value as string);
-        const arrayBuffer = await response.arrayBuffer();
+      if (presignedUrls.value) {
+        console.log("Received presigned URLs:", presignedUrls.value);
 
-        // Store the ArrayBuffer directly
-        niftiData.value = arrayBuffer;
+        // Try FSL URL first
+        let response = await fetch(presignedUrls.value.fsl);
 
-        console.log("NIfTI data loaded");
+        // If FSL fails, try ORI
+        if (!response.ok) {
+          console.log("FSL URL failed, trying ORI URL...");
+          response = await fetch(presignedUrls.value.ori);
+        }
+
+        if (response.ok) {
+          const arrayBuffer = await response.arrayBuffer();
+          niftiData.value = arrayBuffer;
+          console.log("NIfTI data loaded");
+        } else {
+          throw new Error(`Failed to fetch image: ${response.status} ${response.statusText}`);
+        }
+      } else {
+        throw new Error("No presigned URLs received");
       }
     } catch (error) {
       console.error("Error fetching or parsing image:", error);
@@ -256,8 +267,15 @@ async function predictImage() {
           timeout: 2500,
           color: "green",
         });
-      }
-    }
+      }else if (message.includes("has not been preprocessed yet")) {
+        // Handle the case where the image hasn't been preprocessed
+        toast.add({
+          title: "Image Not Preprocessed",
+          description: `The image ${selectedImage.value.name} has not been preprocessed yet. Please wait and try again in a few minutes.`,
+          timeout: 5000,  // Longer timeout for this message
+          color: "yellow",
+        });
+    }}
   } catch (error) {
     console.error("Error predicting image:", error);
     toast.add({
